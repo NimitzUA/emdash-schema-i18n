@@ -1,0 +1,63 @@
+{
+  "name": "emdash-schema-i18n",
+  "version": "1.1.0",
+  "description": "Dynamic schema, collections, and block types localization for EmDash CMS Admin UI",
+  "author": {
+    "name": "Serhii Parshyn",
+    "email": "serhii@parshyn.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NimitzUA/emdash-schema-i18n.git"
+  },
+  "bugs": {
+    "url": "https://github.com/NimitzUA/emdash-schema-i18n/issues"
+  },
+  "homepage": "https://github.com/NimitzUA/emdash-schema-i18n#readme",
+  "keywords": [
+    "emdash",
+    "emdash-plugin",
+    "i18n",
+    "localization",
+    "schema",
+    "admin-ui"
+  ],
+  "bin": {
+    "emdash-schema-i18n": "./bin/cli.mjs"
+  },
+  "type": "module",
+  "main": "./src/index.mjs",
+  "types": "./src/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.mts",
+      "import": "./src/index.mjs"
+    },
+    "./middleware": {
+      "import": "./src/middleware.mjs"
+    },
+    "./admin": "./src/admin/index.tsx"
+  },
+  "files": [
+    "src",
+    "bin",
+    "emdash-plugin.jsonc",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@emdash-cms/admin": "^1.2.0",
+    "emdash": "^1.0.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "typescript": "^5.0.0"
+  }
+}

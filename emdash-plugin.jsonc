@@ -1,0 +1,14 @@
+{
+  "slug": "schema-i18n",
+  "name": "Schema & Blocks i18n",
+  "version": "1.1.0",
+  "description": "Dynamic schema, collections, and block types localization for EmDash CMS Admin UI",
+  "license": "MIT",
+  "author": {
+    "name": "Serhii Parshyn",
+    "email": "serhii@parshyn.com"
+  },
+  "capabilities": [],
+  "allowedHosts": [],
+  "storage": {}
+}
