@@ -214,4 +214,28 @@ test("localizeCollectionsResponse localizes collections in API response", () => 
 	assert.equal(localizedUk.data.items[0].labelSingular, "Кейс");
 });
 
+test("createLocalizationMiddleware injects reload watcher script into admin HTML", async () => {
+	const { createLocalizationMiddleware, RELOAD_WATCHER_SCRIPT } = await import("../src/middleware.mjs");
+	const middleware = createLocalizationMiddleware();
+
+	const mockContext = {
+		url: new URL("http://localhost:4321/_emdash/admin/settings"),
+		request: new Request("http://localhost:4321/_emdash/admin/settings"),
+	};
+
+	const mockNext = async () =>
+		new Response("<!doctype html><html><head></head><body><div id='admin-root'></div></body></html>", {
+			status: 200,
+			headers: { "Content-Type": "text/html; charset=utf-8" },
+		});
+
+	const response = await middleware(mockContext, mockNext);
+	assert.equal(response.status, 200);
+	const text = await response.text();
+	assert.ok(text.includes('id="emdash-i18n-watcher"'));
+	assert.ok(text.includes("MutationObserver"));
+	assert.ok(text.endsWith("</body></html>"));
+});
+
+
 

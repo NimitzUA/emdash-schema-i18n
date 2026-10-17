@@ -4,9 +4,12 @@ export interface SchemaI18nOptions {
 	separator?: string;
 	defaultLocale?: string;
 	dictionary?: Record<string, Record<string, string>>;
+	autoReloadOnLocaleChange?: boolean;
 }
 
 export type CustomLocalizationOptions = SchemaI18nOptions;
+
+export declare const RELOAD_WATCHER_SCRIPT: string;
 
 export declare function schemaLocalization(
 	options?: SchemaI18nOptions,

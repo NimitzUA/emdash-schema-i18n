@@ -1,5 +1,5 @@
 import { definePlugin } from "emdash";
-import { createLocalizationMiddleware } from "./middleware.mjs";
+import { createLocalizationMiddleware, RELOAD_WATCHER_SCRIPT } from "./middleware.mjs";
 import {
 	localizeManifest,
 	localizeBlockTypesResponse,
@@ -10,7 +10,7 @@ import {
 
 const pluginId = "schema-i18n";
 const pluginName = "Schema & Blocks i18n";
-const version = "1.1.0";
+const version = "1.1.1";
 const description = "Dynamic schema, collections, and block types localization for EmDash CMS Admin UI";
 const author = "Serhii Parshyn";
 const packageEntrypoint = "emdash-schema-i18n";
@@ -55,6 +55,7 @@ export function createPlugin(options = {}) {
 
 export {
 	createLocalizationMiddleware,
+	RELOAD_WATCHER_SCRIPT,
 	localizeManifest,
 	localizeBlockTypesResponse,
 	localizeCollectionsResponse,

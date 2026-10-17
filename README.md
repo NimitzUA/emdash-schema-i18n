@@ -2,7 +2,7 @@
 
 > Dynamic schema, collections, and block types localization for **EmDash CMS** Admin UI.
 
-[![npm version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/NimitzUA/emdash-schema-i18n)
+[![npm version](https://img.shields.io/badge/version-1.1.1-blue.svg)](https://github.com/NimitzUA/emdash-schema-i18n)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 **Author:** Serhii Parshyn (<serhii@parshyn.com>)

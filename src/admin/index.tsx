@@ -59,3 +59,27 @@ export function LocalizedText({
 	});
 	return <>{localized}</>;
 }
+
+// Auto-reload watcher on admin UI locale change
+if (
+	typeof window !== "undefined" &&
+	typeof window.MutationObserver !== "undefined" &&
+	!(window as any).__emdash_i18n_lang_watcher__
+) {
+	(window as any).__emdash_i18n_lang_watcher__ = true;
+	let currentLang = document.documentElement.getAttribute("lang") || "";
+	const observer = new MutationObserver(() => {
+		const newLang = document.documentElement.getAttribute("lang") || "";
+		if (newLang && currentLang && newLang !== currentLang) {
+			currentLang = newLang;
+			setTimeout(() => {
+				window.location.reload();
+			}, 60);
+		}
+	});
+	observer.observe(document.documentElement, {
+		attributes: true,
+		attributeFilter: ["lang"],
+	});
+}
+
