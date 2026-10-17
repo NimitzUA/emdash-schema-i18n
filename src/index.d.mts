@@ -43,6 +43,8 @@ export declare function resolveAdminLocale(
 
 export declare function normalizeLocale(code: string): string;
 
+export declare function installLocaleReloadWatcher(): void;
+
 export declare function localizeString(
 	value: unknown,
 	locale: string,

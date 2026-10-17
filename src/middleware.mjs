@@ -3,28 +3,10 @@ import {
 	localizeManifest,
 	localizeBlockTypesResponse,
 	localizeCollectionsResponse,
+	installLocaleReloadWatcher,
 } from "./localizer.mjs";
 
-export const RELOAD_WATCHER_SCRIPT = `<script id="emdash-i18n-watcher">
-(() => {
-	if (typeof window === "undefined" || !window.MutationObserver || window.__emdash_i18n_lang_watcher__) return;
-	window.__emdash_i18n_lang_watcher__ = true;
-	let currentLang = document.documentElement.getAttribute("lang") || "";
-	const observer = new MutationObserver(() => {
-		const newLang = document.documentElement.getAttribute("lang") || "";
-		if (!newLang) return;
-		if (!currentLang) {
-			currentLang = newLang;
-			return;
-		}
-		if (newLang !== currentLang) {
-			currentLang = newLang;
-			setTimeout(() => { window.location.reload(); }, 60);
-		}
-	});
-	observer.observe(document.documentElement, { attributes: true, attributeFilter: ["lang"] });
-})();
-</script>`;
+export const RELOAD_WATCHER_SCRIPT = `<script id="emdash-i18n-watcher">\n(${installLocaleReloadWatcher.toString()})();\n</script>`;
 
 function mergeVaryHeader(headers) {
 	const existingVary = headers.get("Vary");
@@ -84,9 +66,15 @@ export function createLocalizationMiddleware(options = {}) {
 	} = options;
 
 	return async function localizationMiddleware(context, next) {
-		// 1. Process only GET and HEAD requests to prevent mutating writes (POST/PUT/PATCH/DELETE)
+		// 1. Fast-path: process only GET and HEAD requests to prevent mutating writes (POST/PUT/PATCH/DELETE)
 		const method = context.request?.method || "GET";
 		if (method !== "GET" && method !== "HEAD") {
+			return next();
+		}
+
+		// 2. Fast-path: skip all non-EmDash routes immediately without awaiting response inspection
+		const pathname = resolvePathname(context);
+		if (!pathname.startsWith("/_emdash/")) {
 			return next();
 		}
 
@@ -98,7 +86,6 @@ export function createLocalizationMiddleware(options = {}) {
 		}
 
 		if (response?.status >= 200 && response?.status < 300) {
-			const pathname = resolvePathname(context);
 			const isManifest = pathname === "/_emdash/api/manifest";
 			const isBlockTypes =
 				pathname === "/_emdash/api/schema/block-types" ||

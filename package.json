@@ -1,6 +1,6 @@
 {
   "name": "emdash-schema-i18n",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "description": "Dynamic schema, collections, and block types localization for EmDash CMS Admin UI",
   "author": {
     "name": "Serhii Parshyn",
@@ -54,7 +54,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc src/admin/index.tsx --jsx react-jsx --target ES2022 --module NodeNext --moduleResolution NodeNext --strict --skipLibCheck --declaration --outDir src/admin",
+    "build": "tsc",
     "prepack": "npm run build",
     "test": "node --test test/*.test.mjs",
     "test:live": "node --test test/e2e-live.test.mjs",

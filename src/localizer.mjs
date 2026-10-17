@@ -4,6 +4,74 @@
 
 const DEFAULT_SEPARATOR = " / ";
 
+const COLLECTION_TEXT_PROPS = ["label", "labelSingular", "description", "group"];
+const BLOCK_TYPE_TEXT_PROPS = ["label", "description", "category"];
+const FIELD_TEXT_PROPS = ["label", "labelSingular", "description", "placeholder", "hint"];
+const TAXONOMY_TEXT_PROPS = ["label", "labelSingular"];
+
+/**
+ * Cache of known source phrases per dictionary object reference.
+ * Avoids repeated Object.values(dictionary) scans on every string.
+ * @type {WeakMap<object, Set<string>>}
+ */
+const dictionaryPhrasesCache = new WeakMap();
+
+/**
+ * Returns a cached Set of all source keys across all locales in a dictionary.
+ *
+ * @param {Record<string, Record<string, string>>} dictionary
+ * @returns {Set<string>}
+ */
+function getKnownDictionaryPhrases(dictionary) {
+	let cached = dictionaryPhrasesCache.get(dictionary);
+	if (cached) return cached;
+
+	cached = new Set();
+	for (const localeEntries of Object.values(dictionary)) {
+		if (localeEntries && typeof localeEntries === "object") {
+			for (const phrase of Object.keys(localeEntries)) {
+				cached.add(phrase);
+			}
+		}
+	}
+	dictionaryPhrasesCache.set(dictionary, cached);
+	return cached;
+}
+
+/**
+ * Installs a DOM MutationObserver on `document.documentElement[lang]`
+ * that reloads the admin page when the user switches the interface language.
+ */
+export function installLocaleReloadWatcher() {
+	if (
+		typeof window === "undefined" ||
+		typeof window.MutationObserver === "undefined" ||
+		window.__emdash_i18n_lang_watcher__
+	) {
+		return;
+	}
+	window.__emdash_i18n_lang_watcher__ = true;
+	let currentLang = document.documentElement.getAttribute("lang") || "";
+	const observer = new MutationObserver(() => {
+		const newLang = document.documentElement.getAttribute("lang") || "";
+		if (!newLang) return;
+		if (!currentLang) {
+			currentLang = newLang;
+			return;
+		}
+		if (newLang !== currentLang) {
+			currentLang = newLang;
+			setTimeout(() => {
+				window.location.reload();
+			}, 60);
+		}
+	});
+	observer.observe(document.documentElement, {
+		attributes: true,
+		attributeFilter: ["lang"],
+	});
+}
+
 /**
  * Resolves the admin UI locale from an incoming HTTP Request.
  *
@@ -129,22 +197,24 @@ export function localizeString(value, locale, options = {}) {
 
 	if (typeof value !== "string") return value;
 
-	// If the string is registered as a source phrase in any locale dictionary
-	// (e.g. dictionary.uk["Before / after"]), treat it as a canonical phrase rather
-	// than a bilingual "uk / en" string when rendering untranslated/default locales.
-	const isKnownDictionaryPhrase =
-		dictionary &&
-		typeof dictionary === "object" &&
-		Object.values(dictionary).some(
-			(dict) => dict && typeof dict === "object" && Object.hasOwn(dict, value),
-		);
-
 	// 4. Delimited string: "Українська / English"
-	if (!isKnownDictionaryPhrase && splitBilingual && separator && value.includes(separator)) {
+	if (splitBilingual && separator && value.includes(separator)) {
+		// If the string is registered as a source phrase in any locale dictionary
+		// (e.g. dictionary.uk["Before / after"]), treat it as a canonical phrase rather
+		// than a bilingual "uk / en" string when rendering untranslated/default locales.
+		if (
+			dictionary &&
+			typeof dictionary === "object" &&
+			getKnownDictionaryPhrases(dictionary).has(value)
+		) {
+			return value;
+		}
+
 		const parts = value.split(separator);
 		// Only split if exactly 2 parts and 2 locales configured
 		if (parts.length === 2 && Array.isArray(separatorLocales) && separatorLocales.length === 2) {
-			const [firstLocale, secondLocale] = separatorLocales.map((loc) => normalizeLocale(loc));
+			const firstLocale = normalizeLocale(separatorLocales[0]);
+			const secondLocale = normalizeLocale(separatorLocales[1]);
 			if (currentLocale.startsWith(firstLocale)) {
 				return parts[0].trim();
 			}
@@ -160,7 +230,84 @@ export function localizeString(value, locale, options = {}) {
 }
 
 /**
- * Recursively localizes EmDash Manifest collections, fields, and block types.
+ * Localizes a list of named properties on an object in place.
+ *
+ * @param {Record<string, any>} target
+ * @param {string[]} propNames
+ * @param {string} keyPrefix
+ * @param {string} locale
+ * @param {object} options
+ */
+function localizeObjectProps(target, propNames, keyPrefix, locale, options) {
+	for (const prop of propNames) {
+		if (target[prop]) {
+			target[prop] = localizeString(target[prop], locale, {
+				...options,
+				key: `${keyPrefix}.${prop}`,
+			});
+		}
+	}
+}
+
+/**
+ * Localizes fields whether stored as a keyed map `{ [slug]: fieldDef }` or an array `fieldDef[]`.
+ *
+ * @param {any} fields
+ * @param {string} parentKey
+ * @param {string} locale
+ * @param {object} options
+ * @returns {any}
+ */
+function localizeFieldsCollection(fields, parentKey, locale, options) {
+	if (Array.isArray(fields)) {
+		return fields.map((fld) => localizeSingleField(fld, parentKey, locale, options));
+	}
+	if (fields && typeof fields === "object") {
+		const newFields = {};
+		for (const [fSlug, fieldDef] of Object.entries(fields)) {
+			if (!fieldDef || typeof fieldDef !== "object") {
+				newFields[fSlug] = fieldDef;
+				continue;
+			}
+			newFields[fSlug] = localizeSingleField(fieldDef, parentKey, locale, options, fSlug);
+		}
+		return newFields;
+	}
+	return fields;
+}
+
+/**
+ * Localizes an array of select/multiSelect options (strings or `{ value, label }` objects).
+ *
+ * @param {any[]} optionsArray
+ * @param {string} keyPrefix
+ * @param {string} locale
+ * @param {object} options
+ * @returns {any[]}
+ */
+function localizeOptionsArray(optionsArray, keyPrefix, locale, options) {
+	return optionsArray.map((opt, idx) => {
+		if (typeof opt === "string") {
+			return localizeString(opt, locale, {
+				...options,
+				key: `${keyPrefix}.${idx}`,
+			});
+		}
+		if (opt && typeof opt === "object" && opt.label) {
+			return {
+				...opt,
+				label: localizeString(opt.label, locale, {
+					...options,
+					key: `${keyPrefix}.${opt.value || idx}.label`,
+				}),
+			};
+		}
+		return opt;
+	});
+}
+
+/**
+ * Recursively localizes EmDash Manifest collections, fields, block types, menus, taxonomies, and plugins.
  *
  * @param {any} manifest
  * @param {string} locale
@@ -180,52 +327,13 @@ export function localizeManifest(manifest, locale, options = {}) {
 		};
 	}
 
-	// Shallow clone top-level
 	const localized = { ...manifest };
 
 	// 1. Localize Collections
 	if (localized.collections && typeof localized.collections === "object") {
 		const newCollections = {};
 		for (const [colSlug, colDef] of Object.entries(localized.collections)) {
-			if (!colDef || typeof colDef !== "object") {
-				newCollections[colSlug] = colDef;
-				continue;
-			}
-
-			const col = { ...colDef };
-			col.label = localizeString(col.label, locale, {
-				...options,
-				key: `collections.${colSlug}.label`,
-			});
-			if (col.labelSingular) {
-				col.labelSingular = localizeString(col.labelSingular, locale, {
-					...options,
-					key: `collections.${colSlug}.labelSingular`,
-				});
-			}
-			if (col.description) {
-				col.description = localizeString(col.description, locale, {
-					...options,
-					key: `collections.${colSlug}.description`,
-				});
-			}
-
-			// Localize collection fields
-			if (col.fields && typeof col.fields === "object" && !Array.isArray(col.fields)) {
-				const newFields = {};
-				for (const [fSlug, fieldDef] of Object.entries(col.fields)) {
-					if (!fieldDef || typeof fieldDef !== "object") {
-						newFields[fSlug] = fieldDef;
-						continue;
-					}
-					newFields[fSlug] = localizeSingleField(fieldDef, `collections.${colSlug}`, locale, options);
-				}
-				col.fields = newFields;
-			} else if (Array.isArray(col.fields)) {
-				col.fields = col.fields.map((fld) => localizeSingleField(fld, `collections.${colSlug}`, locale, options));
-			}
-
-			newCollections[colSlug] = col;
+			newCollections[colSlug] = localizeSingleCollection(colDef, locale, options, colSlug);
 		}
 		localized.collections = newCollections;
 	}
@@ -248,7 +356,123 @@ export function localizeManifest(manifest, locale, options = {}) {
 		});
 	}
 
+	// 4. Localize Taxonomies
+	if (Array.isArray(localized.taxonomies)) {
+		localized.taxonomies = localized.taxonomies.map((tax) => {
+			if (!tax || typeof tax !== "object") return tax;
+			const t = { ...tax };
+			const taxSlug = t.name || t.slug || t.id || "unknown";
+			localizeObjectProps(t, TAXONOMY_TEXT_PROPS, `taxonomies.${taxSlug}`, locale, options);
+			return t;
+		});
+	}
+
+	// 5. Localize Plugin UI contributions (adminPages, dashboardWidgets, fieldWidgets, portableTextBlocks)
+	if (localized.plugins && typeof localized.plugins === "object" && !Array.isArray(localized.plugins)) {
+		const newPlugins = {};
+		for (const [pluginId, pluginDef] of Object.entries(localized.plugins)) {
+			if (!pluginDef || typeof pluginDef !== "object") {
+				newPlugins[pluginId] = pluginDef;
+				continue;
+			}
+			newPlugins[pluginId] = localizeManifestPlugin(pluginDef, pluginId, locale, options);
+		}
+		localized.plugins = newPlugins;
+	}
+
 	return localized;
+}
+
+function localizeManifestPlugin(pluginDef, pluginId, locale, options) {
+	const p = { ...pluginDef };
+	const prefix = `plugins.${pluginId}`;
+
+	if (Array.isArray(p.adminPages)) {
+		p.adminPages = p.adminPages.map((page, idx) => {
+			if (!page || typeof page !== "object") return page;
+			const pg = { ...page };
+			localizeObjectProps(pg, ["label", "group"], `${prefix}.adminPages.${pg.path || idx}`, locale, options);
+			return pg;
+		});
+	}
+
+	if (Array.isArray(p.dashboardWidgets)) {
+		p.dashboardWidgets = p.dashboardWidgets.map((widget, idx) => {
+			if (!widget || typeof widget !== "object") return widget;
+			const w = { ...widget };
+			localizeObjectProps(w, ["title"], `${prefix}.dashboardWidgets.${w.id || idx}`, locale, options);
+			return w;
+		});
+	}
+
+	if (Array.isArray(p.fieldWidgets)) {
+		p.fieldWidgets = p.fieldWidgets.map((fw, idx) => {
+			if (!fw || typeof fw !== "object") return fw;
+			const w = { ...fw };
+			localizeObjectProps(w, ["label"], `${prefix}.fieldWidgets.${w.name || idx}`, locale, options);
+			return w;
+		});
+	}
+
+	if (Array.isArray(p.portableTextBlocks)) {
+		p.portableTextBlocks = p.portableTextBlocks.map((ptb, idx) => {
+			if (!ptb || typeof ptb !== "object") return ptb;
+			const b = { ...ptb };
+			localizeObjectProps(
+				b,
+				["label", "description", "placeholder"],
+				`${prefix}.portableTextBlocks.${b.type || idx}`,
+				locale,
+				options,
+			);
+			return b;
+		});
+	}
+
+	return p;
+}
+
+/**
+ * Generic API envelope unwrapper for list and single-item schema responses.
+ *
+ * @param {any} data
+ * @param {(item: any) => any} localizeItem
+ * @param {(item: any) => boolean} isDirectItem
+ * @returns {any}
+ */
+function localizeSchemaEnvelope(data, localizeItem, isDirectItem) {
+	if (!data || typeof data !== "object") return data;
+
+	if (data.data && typeof data.data === "object" && !Array.isArray(data.data)) {
+		return {
+			...data,
+			data: localizeSchemaEnvelope(data.data, localizeItem, isDirectItem),
+		};
+	}
+
+	if (Array.isArray(data.items)) {
+		return {
+			...data,
+			items: data.items.map(localizeItem),
+		};
+	}
+
+	if (Array.isArray(data)) {
+		return data.map(localizeItem);
+	}
+
+	if (data.item && typeof data.item === "object" && !Array.isArray(data.item)) {
+		return {
+			...data,
+			item: localizeItem(data.item),
+		};
+	}
+
+	if (isDirectItem(data)) {
+		return localizeItem(data);
+	}
+
+	return data;
 }
 
 /**
@@ -260,40 +484,11 @@ export function localizeManifest(manifest, locale, options = {}) {
  * @returns {any}
  */
 export function localizeBlockTypesResponse(data, locale, options = {}) {
-	if (!data || typeof data !== "object") return data;
-
-	if (data.data && typeof data.data === "object" && !Array.isArray(data.data)) {
-		return {
-			...data,
-			data: localizeBlockTypesResponse(data.data, locale, options),
-		};
-	}
-
-	if (Array.isArray(data.items)) {
-		return {
-			...data,
-			items: data.items.map((bt) => localizeSingleBlockType(bt, locale, options)),
-		};
-	}
-
-	if (Array.isArray(data)) {
-		return data.map((bt) => localizeSingleBlockType(bt, locale, options));
-	}
-
-	// Single item envelope: { item: blockType }
-	if (data.item && typeof data.item === "object" && !Array.isArray(data.item)) {
-		return {
-			...data,
-			item: localizeSingleBlockType(data.item, locale, options),
-		};
-	}
-
-	// Single block type object: { slug: "...", label: "..." }
-	if (data.slug || data.type || data.name) {
-		return localizeSingleBlockType(data, locale, options);
-	}
-
-	return data;
+	return localizeSchemaEnvelope(
+		data,
+		(bt) => localizeSingleBlockType(bt, locale, options),
+		(d) => Boolean(d.slug || d.type || d.name),
+	);
 }
 
 /**
@@ -305,26 +500,12 @@ function localizeSingleBlockType(bt, locale, options = {}) {
 	if (!bt || typeof bt !== "object") return bt;
 	const block = { ...bt };
 	const btSlug = block.slug || block.type || block.name || "unknown";
+	const keyPrefix = `blockTypes.${btSlug}`;
 
-	block.label = localizeString(block.label, locale, {
-		...options,
-		key: `blockTypes.${btSlug}.label`,
-	});
-	if (block.description) {
-		block.description = localizeString(block.description, locale, {
-			...options,
-			key: `blockTypes.${btSlug}.description`,
-		});
-	}
-	if (block.category) {
-		block.category = localizeString(block.category, locale, {
-			...options,
-			key: `blockTypes.${btSlug}.category`,
-		});
-	}
+	localizeObjectProps(block, BLOCK_TYPE_TEXT_PROPS, keyPrefix, locale, options);
 
 	if (Array.isArray(block.fields)) {
-		block.fields = block.fields.map((fld) => localizeSingleField(fld, `blockTypes.${btSlug}`, locale, options));
+		block.fields = block.fields.map((fld) => localizeSingleField(fld, keyPrefix, locale, options));
 	}
 
 	if (Array.isArray(block.versions)) {
@@ -332,7 +513,7 @@ function localizeSingleBlockType(bt, locale, options = {}) {
 			if (!ver || !Array.isArray(ver.fields)) return ver;
 			return {
 				...ver,
-				fields: ver.fields.map((fld) => localizeSingleField(fld, `blockTypes.${btSlug}`, locale, options)),
+				fields: ver.fields.map((fld) => localizeSingleField(fld, keyPrefix, locale, options)),
 			};
 		});
 	}
@@ -340,101 +521,48 @@ function localizeSingleBlockType(bt, locale, options = {}) {
 	return block;
 }
 
-function localizeSingleField(fld, parentKey, locale, options = {}) {
+function localizeSingleField(fld, parentKey, locale, options = {}, fallbackSlug = undefined) {
 	if (!fld || typeof fld !== "object") return fld;
 	const field = { ...fld };
-	const fSlug = field.slug || "unknown";
+	const fSlug = field.slug || fallbackSlug || "unknown";
+	const fieldKeyPrefix = `${parentKey}.fields.${fSlug}`;
 
-	if (field.label) {
-		field.label = localizeString(field.label, locale, {
-			...options,
-			key: `${parentKey}.fields.${fSlug}.label`,
-		});
-	}
-	if (field.labelSingular) {
-		field.labelSingular = localizeString(field.labelSingular, locale, {
-			...options,
-			key: `${parentKey}.fields.${fSlug}.labelSingular`,
-		});
-	}
-	if (field.description) {
-		field.description = localizeString(field.description, locale, {
-			...options,
-			key: `${parentKey}.fields.${fSlug}.description`,
-		});
-	}
-	if (field.placeholder) {
-		field.placeholder = localizeString(field.placeholder, locale, {
-			...options,
-			key: `${parentKey}.fields.${fSlug}.placeholder`,
-		});
-	}
-	if (field.hint) {
-		field.hint = localizeString(field.hint, locale, {
-			...options,
-			key: `${parentKey}.fields.${fSlug}.hint`,
-		});
-	}
+	localizeObjectProps(field, FIELD_TEXT_PROPS, fieldKeyPrefix, locale, options);
 
 	// Options for select / multiSelect
 	if (Array.isArray(field.options)) {
-		field.options = field.options.map((opt, idx) => {
-			if (typeof opt === "string") {
-				return localizeString(opt, locale, {
-					...options,
-					key: `${parentKey}.fields.${fSlug}.options.${idx}`,
-				});
-			}
-			if (opt && typeof opt === "object") {
-				return {
-					...opt,
-					label: opt.label
-						? localizeString(opt.label, locale, {
-								...options,
-								key: `${parentKey}.fields.${fSlug}.options.${opt.value || idx}.label`,
-						  })
-						: opt.label,
-				};
-			}
-			return opt;
-		});
+		field.options = localizeOptionsArray(field.options, `${fieldKeyPrefix}.options`, locale, options);
 	}
 
-	if (field.validation && Array.isArray(field.validation.options)) {
-		field.validation = {
-			...field.validation,
-			options: field.validation.options.map((opt, idx) => {
-				if (typeof opt === "string") {
-					return localizeString(opt, locale, {
-						...options,
-						key: `${parentKey}.fields.${fSlug}.options.${idx}`,
-					});
-				}
-				if (opt && typeof opt === "object" && opt.label) {
-					return {
-						...opt,
-						label: localizeString(opt.label, locale, {
-							...options,
-							key: `${parentKey}.fields.${fSlug}.options.${opt.value || idx}.label`,
-						}),
-					};
-				}
-				return opt;
-			}),
-		};
+	if (field.validation && typeof field.validation === "object") {
+		let validationChanged = false;
+		const newValidation = { ...field.validation };
+
+		if (Array.isArray(newValidation.options)) {
+			newValidation.options = localizeOptionsArray(
+				newValidation.options,
+				`${fieldKeyPrefix}.options`,
+				locale,
+				options,
+			);
+			validationChanged = true;
+		}
+
+		if (Array.isArray(newValidation.subFields)) {
+			newValidation.subFields = newValidation.subFields.map((sub) =>
+				localizeSingleField(sub, fieldKeyPrefix, locale, options),
+			);
+			validationChanged = true;
+		}
+
+		if (validationChanged) {
+			field.validation = newValidation;
+		}
 	}
 
 	// Subfields (repeaters, groups)
 	if (Array.isArray(field.fields)) {
-		field.fields = field.fields.map((sub) => localizeSingleField(sub, `${parentKey}.fields.${fSlug}`, locale, options));
-	}
-	if (field.validation && Array.isArray(field.validation.subFields)) {
-		field.validation = {
-			...field.validation,
-			subFields: field.validation.subFields.map((sub) =>
-				localizeSingleField(sub, `${parentKey}.fields.${fSlug}`, locale, options),
-			),
-		};
+		field.fields = field.fields.map((sub) => localizeSingleField(sub, fieldKeyPrefix, locale, options));
 	}
 
 	// Block types inside blocks fields (e.g. case_study.fields.blocks.blockTypes)
@@ -454,71 +582,23 @@ function localizeSingleField(fld, parentKey, locale, options = {}) {
  * @returns {any}
  */
 export function localizeCollectionsResponse(data, locale, options = {}) {
-	if (!data || typeof data !== "object") return data;
-
-	if (data.data && typeof data.data === "object" && !Array.isArray(data.data)) {
-		return {
-			...data,
-			data: localizeCollectionsResponse(data.data, locale, options),
-		};
-	}
-
-	if (Array.isArray(data.items)) {
-		return {
-			...data,
-			items: data.items.map((col) => localizeSingleCollection(col, locale, options)),
-		};
-	}
-
-	if (Array.isArray(data)) {
-		return data.map((col) => localizeSingleCollection(col, locale, options));
-	}
-
-	// Single item envelope: { item: collection }
-	if (data.item && typeof data.item === "object" && !Array.isArray(data.item)) {
-		return {
-			...data,
-			item: localizeSingleCollection(data.item, locale, options),
-		};
-	}
-
-	if (data.slug || data.label) {
-		return localizeSingleCollection(data, locale, options);
-	}
-
-	return data;
+	return localizeSchemaEnvelope(
+		data,
+		(col) => localizeSingleCollection(col, locale, options),
+		(d) => Boolean(d.slug || d.label),
+	);
 }
 
-function localizeSingleCollection(col, locale, options = {}) {
+function localizeSingleCollection(col, locale, options = {}, fallbackSlug = undefined) {
 	if (!col || typeof col !== "object") return col;
 	const c = { ...col };
-	const cSlug = c.slug || "unknown";
+	const cSlug = c.slug || fallbackSlug || "unknown";
+	const keyPrefix = `collections.${cSlug}`;
 
-	c.label = localizeString(c.label, locale, {
-		...options,
-		key: `collections.${cSlug}.label`,
-	});
-	if (c.labelSingular) {
-		c.labelSingular = localizeString(c.labelSingular, locale, {
-			...options,
-			key: `collections.${cSlug}.labelSingular`,
-		});
-	}
-	if (c.description) {
-		c.description = localizeString(c.description, locale, {
-			...options,
-			key: `collections.${cSlug}.description`,
-		});
-	}
+	localizeObjectProps(c, COLLECTION_TEXT_PROPS, keyPrefix, locale, options);
 
-	if (c.fields && typeof c.fields === "object" && !Array.isArray(c.fields)) {
-		const newFields = {};
-		for (const [fSlug, fDef] of Object.entries(c.fields)) {
-			newFields[fSlug] = localizeSingleField(fDef, `collections.${cSlug}`, locale, options);
-		}
-		c.fields = newFields;
-	} else if (Array.isArray(c.fields)) {
-		c.fields = c.fields.map((fld) => localizeSingleField(fld, `collections.${cSlug}`, locale, options));
+	if (c.fields) {
+		c.fields = localizeFieldsCollection(c.fields, keyPrefix, locale, options);
 	}
 
 	return c;

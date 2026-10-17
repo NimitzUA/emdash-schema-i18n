@@ -23,8 +23,8 @@ In EmDash CMS, metadata for collections, fields, and block types (`label`, `labe
 - **Direct English-first schema:** Keep all your database models and `seed.json` schemas in clean English without slashes.
 - **Dictionary phrase lookup:** Easily map English phrases to any target language (`"Case studies": "Кейси"`, `"Chapter": "Розділ"`).
 - **Exact path overrides:** Override specific fields when needed (e.g. `collections.case_study.fields.title.label`).
-- **Comprehensive coverage:** Localizes collections, singular labels, field inputs, dropdown options, and block types with all their nested version fields.
-- **Automatic Scaffolding:** Scans schemas and block types to scaffold untranslated strings via CLI.
+- **Comprehensive coverage:** Localizes collections (including sidebar `group` folders), singular labels, field inputs, dropdown options, taxonomies, menus, plugin UI contributions, and block types with all their nested version fields.
+- **Automatic Scaffolding:** Scans schemas and block types to scaffold untranslated strings via CLI (`--locale=uk`, `--locale=pl`, etc.).
 - **Zero-config slash fallback:** Still supports automatic splitting of legacy bilingual strings (`"Українська / English"`).
 
 ---
@@ -169,15 +169,18 @@ By default, `excludeSchemaEditor: true` is enabled:
 To extract all schema and block type strings into a translation dictionary automatically:
 
 ```bash
-# Run directly via npx
+# Run directly via npx (defaults to --locale=uk)
 npx emdash-schema-i18n extract
+
+# Or specify a custom target locale, seed path, or output file
+npx emdash-schema-i18n extract --locale=pl --seed=seed/seed.json --out=src/i18n/admin.ts
 
 # Or add to your package.json scripts:
 # "i18n:extract": "emdash-schema-i18n extract"
 npm run i18n:extract
 ```
 
-The CLI inspects `seed/seed.json` and block type definitions, preserves all existing translations, and appends newly discovered untranslated strings targeting the Ukrainian (`uk`) dictionary.
+The CLI inspects `seed/seed.json` (collections, fields, options, block types, taxonomies, and menus), preserves all existing translations and locale blocks, and appends newly discovered untranslated strings.
 
 ---
 

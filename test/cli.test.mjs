@@ -256,3 +256,55 @@ test("CLI extract handles escaped characters without double-escaping and extract
 	fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+test("CLI extract supports --locale flag and preserves other existing locales in admin.ts", async () => {
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "emdash-cli-test-"));
+	const seedPath = path.join(tmpDir, "seed.json");
+	const outTsPath = path.join(tmpDir, "admin.ts");
+
+	const seed = {
+		collections: [
+			{
+				label: "Articles",
+				group: "Content",
+			},
+		],
+		taxonomies: [
+			{
+				name: "tags",
+				label: "Tags",
+			},
+		],
+	};
+	fs.writeFileSync(seedPath, JSON.stringify(seed, null, 2), "utf-8");
+
+	const initialTs = `export const adminDictionary = {
+	uk: {
+		"Articles": "Статті",
+	},
+	pl: {
+		"Articles": "Artykuły",
+	},
+};
+`;
+	fs.writeFileSync(outTsPath, initialTs, "utf-8");
+
+	await execFileAsync("node", [
+		cliPath,
+		"extract",
+		"--locale=pl",
+		`--seed=${seedPath}`,
+		`--out=${outTsPath}`,
+	]);
+
+	const updatedTs = fs.readFileSync(outTsPath, "utf-8");
+	assert.ok(updatedTs.includes("pl: {"));
+	assert.ok(updatedTs.includes('"Articles": "Artykuły"'));
+	assert.ok(updatedTs.includes('"Content": ""'));
+	assert.ok(updatedTs.includes('"Tags": ""'));
+	// Ukrainian locale block must still be preserved
+	assert.ok(updatedTs.includes("uk: {"));
+	assert.ok(updatedTs.includes('"Articles": "Статті"'));
+
+	fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+

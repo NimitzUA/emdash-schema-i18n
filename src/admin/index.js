@@ -1,7 +1,7 @@
 import { Fragment as _Fragment, jsx as _jsx } from "react/jsx-runtime";
 import * as React from "react";
 import { useLingui } from "@lingui/react";
-import { localizeString } from "../localizer.mjs";
+import { localizeString, installLocaleReloadWatcher } from "../localizer.mjs";
 const DEFAULT_SEPARATOR = " / ";
 /**
  * Hook to retrieve the active admin UI locale.
@@ -37,28 +37,4 @@ export function LocalizedText({ children, separator = DEFAULT_SEPARATOR, diction
     return _jsx(_Fragment, { children: localized });
 }
 // Auto-reload watcher on admin UI locale change
-if (typeof window !== "undefined" &&
-    typeof window.MutationObserver !== "undefined" &&
-    !window.__emdash_i18n_lang_watcher__) {
-    window.__emdash_i18n_lang_watcher__ = true;
-    let currentLang = document.documentElement.getAttribute("lang") || "";
-    const observer = new MutationObserver(() => {
-        const newLang = document.documentElement.getAttribute("lang") || "";
-        if (!newLang)
-            return;
-        if (!currentLang) {
-            currentLang = newLang;
-            return;
-        }
-        if (newLang !== currentLang) {
-            currentLang = newLang;
-            setTimeout(() => {
-                window.location.reload();
-            }, 60);
-        }
-    });
-    observer.observe(document.documentElement, {
-        attributes: true,
-        attributeFilter: ["lang"],
-    });
-}
+installLocaleReloadWatcher();

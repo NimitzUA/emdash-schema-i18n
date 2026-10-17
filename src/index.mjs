@@ -13,6 +13,7 @@ import {
 	localizeString,
 	resolveAdminLocale,
 	normalizeLocale,
+	installLocaleReloadWatcher,
 } from "./localizer.mjs";
 
 const pluginId = "schema-i18n";
@@ -70,6 +71,7 @@ export {
 	localizeString,
 	resolveAdminLocale,
 	normalizeLocale,
+	installLocaleReloadWatcher,
 };
 
 export default schemaLocalization;

@@ -6,6 +6,8 @@ export interface LocalizeOptions {
 	separatorLocales?: string[];
 }
 
+export declare function installLocaleReloadWatcher(): void;
+
 export declare function normalizeLocale(code: string): string;
 
 export declare function resolveAdminLocale(

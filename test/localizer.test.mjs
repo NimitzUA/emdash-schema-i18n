@@ -270,3 +270,58 @@ test("createLocalizationMiddleware injects reload watcher script into admin HTML
 	assert.ok(text.includes("MutationObserver"));
 	assert.ok(text.endsWith("</body></html>"));
 });
+
+test("localizeManifest localizes collection group, taxonomies, and plugin UI contributions", () => {
+	const manifest = {
+		collections: {
+			articles: {
+				label: "Articles",
+				group: "Editorial",
+				fields: {},
+			},
+		},
+		taxonomies: [
+			{
+				id: "tax_1",
+				name: "categories",
+				label: "Categories",
+				labelSingular: "Category",
+			},
+		],
+		plugins: {
+			seo: {
+				adminPages: [{ path: "/seo", label: "SEO Settings", group: "Marketing" }],
+				dashboardWidgets: [{ id: "stats", title: "Traffic Overview" }],
+				fieldWidgets: [{ name: "color", label: "Color Picker" }],
+				portableTextBlocks: [{ type: "alert", label: "Alert Box", description: "Warning callout" }],
+			},
+		},
+	};
+
+	const dict = {
+		uk: {
+			Articles: "Статті",
+			Editorial: "Редакція",
+			Categories: "Категорії",
+			Category: "Категорія",
+			"SEO Settings": "Налаштування SEO",
+			Marketing: "Маркетинг",
+			"Traffic Overview": "Огляд трафіку",
+			"Color Picker": "Вибір кольору",
+			"Alert Box": "Блок сповіщення",
+			"Warning callout": "Попереджувальна плашка",
+		},
+	};
+
+	const localized = localizeManifest(manifest, "uk", { dictionary: dict });
+	assert.equal(localized.collections.articles.group, "Редакція");
+	assert.equal(localized.taxonomies[0].label, "Категорії");
+	assert.equal(localized.taxonomies[0].labelSingular, "Категорія");
+	assert.equal(localized.plugins.seo.adminPages[0].label, "Налаштування SEO");
+	assert.equal(localized.plugins.seo.adminPages[0].group, "Маркетинг");
+	assert.equal(localized.plugins.seo.dashboardWidgets[0].title, "Огляд трафіку");
+	assert.equal(localized.plugins.seo.fieldWidgets[0].label, "Вибір кольору");
+	assert.equal(localized.plugins.seo.portableTextBlocks[0].label, "Блок сповіщення");
+	assert.equal(localized.plugins.seo.portableTextBlocks[0].description, "Попереджувальна плашка");
+});
+
