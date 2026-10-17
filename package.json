@@ -1,6 +1,6 @@
 {
   "name": "emdash-schema-i18n",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Dynamic schema, collections, and block types localization for EmDash CMS Admin UI",
   "author": {
     "name": "Serhii Parshyn",

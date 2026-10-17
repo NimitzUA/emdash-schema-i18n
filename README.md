@@ -2,8 +2,9 @@
 
 > Dynamic schema, collections, and block types localization for **EmDash CMS** Admin UI.
 
-[![npm version](https://img.shields.io/badge/version-1.1.1-blue.svg)](https://github.com/NimitzUA/emdash-schema-i18n)
-[![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![npm version](https://img.shields.io/npm/v/emdash-schema-i18n.svg)](https://www.npmjs.com/package/emdash-schema-i18n)
+[![npm downloads](https://img.shields.io/npm/dm/emdash-schema-i18n.svg)](https://www.npmjs.com/package/emdash-schema-i18n)
+[![license](https://img.shields.io/npm/l/emdash-schema-i18n.svg)](LICENSE)
 
 **Author:** Serhii Parshyn (<serhii@parshyn.com>)
 
@@ -23,7 +24,7 @@ In EmDash CMS, metadata for collections, fields, and block types (`label`, `labe
 - **Dictionary phrase lookup:** Easily map English phrases to any target language (`"Case studies": "Кейси"`, `"Chapter": "Розділ"`).
 - **Exact path overrides:** Override specific fields when needed (e.g. `collections.case_study.fields.title.label`).
 - **Comprehensive coverage:** Localizes collections, singular labels, field inputs, dropdown options, and block types with all their nested version fields.
-- **Automatic Scaffolding:** Comes with an extraction script (`npm run i18n:extract`) that scans schemas and block types to scaffold untranslated strings.
+- **Automatic Scaffolding:** Scans schemas and block types to scaffold untranslated strings via CLI.
 - **Zero-config slash fallback:** Still supports automatic splitting of legacy bilingual strings (`"Українська / English"`).
 
 ---
@@ -40,7 +41,27 @@ In EmDash CMS, metadata for collections, fields, and block types (`label`, `labe
 
 ---
 
-## Installation & Setup
+## Installation
+
+Install the package from npm using your package manager of choice:
+
+```bash
+# npm
+npm install emdash-schema-i18n
+
+# pnpm
+pnpm add emdash-schema-i18n
+
+# yarn
+yarn add emdash-schema-i18n
+
+# bun
+bun add emdash-schema-i18n
+```
+
+---
+
+## Setup & Configuration
 
 ### 1. In `astro.config.mjs`
 
@@ -134,15 +155,20 @@ export default adminDictionary;
 
 ---
 
-## Scaffolding
-
-To extract all schema and block type strings automatically:
+## Scaffolding & CLI
+ 
+To extract all schema and block type strings into a translation dictionary automatically:
 
 ```bash
+# Run directly via npx
+npx emdash-schema-i18n extract
+
+# Or add to your package.json scripts:
+# "i18n:extract": "emdash-schema-i18n extract"
 npm run i18n:extract
 ```
 
-The script scans `seed/seed.json` and block types, preserves all existing translations, and appends any newly created untranslated fields.
+The CLI scans `seed/seed.json` and block types, preserves all existing translations, and appends any newly created untranslated fields.
 
 ---
 
