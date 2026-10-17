@@ -31,7 +31,11 @@ export function resolveAdminLocale(request, defaultLocale = "en") {
 	const cookieHeader = request.headers.get("cookie") || "";
 	const cookieMatch = cookieHeader.match(/(?:^|;\s*)emdash-locale=([^;]+)/);
 	if (cookieMatch?.[1]) {
-		return normalizeLocale(decodeURIComponent(cookieMatch[1].trim()));
+		try {
+			return normalizeLocale(decodeURIComponent(cookieMatch[1].trim()));
+		} catch {
+			return normalizeLocale(cookieMatch[1].trim());
+		}
 	}
 
 	const acceptLanguage = request.headers.get("accept-language");
@@ -58,9 +62,10 @@ export function normalizeLocale(code) {
  * Localizes a single string or object value.
  *
  * Supported formats:
- * 1. Delimited string: `"Українська / English"`
- * 2. Multi-language object: `{ uk: "Українська", en: "English" }`
- * 3. Explicit dictionary override: `options.dictionary[locale][key]`
+ * 1. Explicit dictionary override by key: `options.dictionary[locale][key]`
+ * 2. Phrase dictionary lookup by value: `options.dictionary[locale][value]`
+ * 3. Multi-language object: `{ uk: "Українська", en: "English" }`
+ * 4. Delimited string: `"Українська / English"`
  *
  * @param {unknown} value
  * @param {string} locale
@@ -68,43 +73,87 @@ export function normalizeLocale(code) {
  * @param {string} [options.key]
  * @param {Record<string, Record<string, string>>} [options.dictionary]
  * @param {string} [options.separator=" / "]
+ * @param {boolean} [options.splitBilingual=true]
+ * @param {string[]} [options.separatorLocales=["uk", "en"]]
  * @returns {unknown}
  */
 export function localizeString(value, locale, options = {}) {
 	const currentLocale = normalizeLocale(locale);
-	const { key, dictionary, separator = DEFAULT_SEPARATOR } = options;
+	const {
+		key,
+		dictionary,
+		separator = DEFAULT_SEPARATOR,
+		splitBilingual = true,
+		separatorLocales = ["uk", "en"],
+	} = options;
+
+	const localeDict =
+		dictionary &&
+		typeof dictionary === "object" &&
+		Object.hasOwn(dictionary, currentLocale)
+			? dictionary[currentLocale]
+			: undefined;
 
 	// 1. Check explicit dictionary by key (e.g. "collections.case_study.label")
-	if (key && dictionary?.[currentLocale]?.[key]) {
-		return dictionary[currentLocale][key];
+	if (
+		key &&
+		localeDict &&
+		typeof localeDict === "object" &&
+		Object.hasOwn(localeDict, key) &&
+		localeDict[key]
+	) {
+		return localeDict[key];
 	}
 
 	// 2. Check dictionary by string value (e.g. "Case studies" -> "Кейси")
-	if (typeof value === "string" && dictionary?.[currentLocale]?.[value]) {
-		return dictionary[currentLocale][value];
+	if (
+		typeof value === "string" &&
+		localeDict &&
+		typeof localeDict === "object" &&
+		Object.hasOwn(localeDict, value) &&
+		localeDict[value]
+	) {
+		return localeDict[value];
 	}
 
-	// 2. Object with language keys: { uk: "...", en: "..." }
+	// 3. Object with language keys: { uk: "...", en: "..." }
 	if (value && typeof value === "object" && !Array.isArray(value)) {
 		const obj = /** @type {Record<string, any>} */ (value);
-		if (obj[currentLocale] !== undefined) return obj[currentLocale];
-		if (obj.en !== undefined) return obj.en;
-		if (obj.uk !== undefined) return obj.uk;
+		if (Object.hasOwn(obj, currentLocale) && obj[currentLocale] !== undefined) {
+			return obj[currentLocale];
+		}
+		if (Object.hasOwn(obj, "en") && obj.en !== undefined) return obj.en;
+		if (Object.hasOwn(obj, "uk") && obj.uk !== undefined) return obj.uk;
 		return value;
 	}
 
 	if (typeof value !== "string") return value;
 
-	// 3. Delimited string: "Українська / English"
-	if (value.includes(separator)) {
+	// If the string is registered as a source phrase in any locale dictionary
+	// (e.g. dictionary.uk["Before / after"]), treat it as a canonical phrase rather
+	// than a bilingual "uk / en" string when rendering untranslated/default locales.
+	const isKnownDictionaryPhrase =
+		dictionary &&
+		typeof dictionary === "object" &&
+		Object.values(dictionary).some(
+			(dict) => dict && typeof dict === "object" && Object.hasOwn(dict, value),
+		);
+
+	// 4. Delimited string: "Українська / English"
+	if (!isKnownDictionaryPhrase && splitBilingual && separator && value.includes(separator)) {
 		const parts = value.split(separator);
-		if (parts.length === 2) {
-			const [uk, en] = parts;
-			return currentLocale.startsWith("uk") ? uk.trim() : en.trim();
+		// Only split if exactly 2 parts and 2 locales configured
+		if (parts.length === 2 && Array.isArray(separatorLocales) && separatorLocales.length === 2) {
+			const [firstLocale, secondLocale] = separatorLocales.map((loc) => normalizeLocale(loc));
+			if (currentLocale.startsWith(firstLocale)) {
+				return parts[0].trim();
+			}
+			if (currentLocale.startsWith(secondLocale)) {
+				return parts[1].trim();
+			}
+			// If active locale is neither of separatorLocales, preserve original string
+			return value;
 		}
-		// If more than 2 parts, uk is 0, en is 1, etc.
-		if (currentLocale.startsWith("uk")) return parts[0].trim();
-		if (parts.length > 1) return parts[1].trim();
 	}
 
 	return value;
@@ -145,19 +194,19 @@ export function localizeManifest(manifest, locale, options = {}) {
 
 			const col = { ...colDef };
 			col.label = localizeString(col.label, locale, {
-				key: `collections.${colSlug}.label`,
 				...options,
+				key: `collections.${colSlug}.label`,
 			});
 			if (col.labelSingular) {
 				col.labelSingular = localizeString(col.labelSingular, locale, {
-					key: `collections.${colSlug}.labelSingular`,
 					...options,
+					key: `collections.${colSlug}.labelSingular`,
 				});
 			}
 			if (col.description) {
 				col.description = localizeString(col.description, locale, {
-					key: `collections.${colSlug}.description`,
 					...options,
+					key: `collections.${colSlug}.description`,
 				});
 			}
 
@@ -192,8 +241,8 @@ export function localizeManifest(manifest, locale, options = {}) {
 			if (!menu || typeof menu !== "object") return menu;
 			const m = { ...menu };
 			m.name = localizeString(m.name, locale, {
-				key: `menus.${m.slug || m.id}.name`,
 				...options,
+				key: `menus.${m.slug || m.id}.name`,
 			});
 			return m;
 		});
@@ -231,8 +280,26 @@ export function localizeBlockTypesResponse(data, locale, options = {}) {
 		return data.map((bt) => localizeSingleBlockType(bt, locale, options));
 	}
 
+	// Single item envelope: { item: blockType }
+	if (data.item && typeof data.item === "object" && !Array.isArray(data.item)) {
+		return {
+			...data,
+			item: localizeSingleBlockType(data.item, locale, options),
+		};
+	}
+
+	// Single block type object: { slug: "...", label: "..." }
+	if (data.slug || data.type || data.name) {
+		return localizeSingleBlockType(data, locale, options);
+	}
+
 	return data;
 }
+
+/**
+ * Localizes a single block type response (GET /_emdash/api/schema/block-types/[slug]).
+ */
+export const localizeBlockTypeResponse = localizeBlockTypesResponse;
 
 function localizeSingleBlockType(bt, locale, options = {}) {
 	if (!bt || typeof bt !== "object") return bt;
@@ -240,19 +307,19 @@ function localizeSingleBlockType(bt, locale, options = {}) {
 	const btSlug = block.slug || block.type || block.name || "unknown";
 
 	block.label = localizeString(block.label, locale, {
-		key: `blockTypes.${btSlug}.label`,
 		...options,
+		key: `blockTypes.${btSlug}.label`,
 	});
 	if (block.description) {
 		block.description = localizeString(block.description, locale, {
-			key: `blockTypes.${btSlug}.description`,
 			...options,
+			key: `blockTypes.${btSlug}.description`,
 		});
 	}
 	if (block.category) {
 		block.category = localizeString(block.category, locale, {
-			key: `blockTypes.${btSlug}.category`,
 			...options,
+			key: `blockTypes.${btSlug}.category`,
 		});
 	}
 
@@ -280,32 +347,32 @@ function localizeSingleField(fld, parentKey, locale, options = {}) {
 
 	if (field.label) {
 		field.label = localizeString(field.label, locale, {
-			key: `${parentKey}.fields.${fSlug}.label`,
 			...options,
+			key: `${parentKey}.fields.${fSlug}.label`,
 		});
 	}
 	if (field.labelSingular) {
 		field.labelSingular = localizeString(field.labelSingular, locale, {
-			key: `${parentKey}.fields.${fSlug}.labelSingular`,
 			...options,
+			key: `${parentKey}.fields.${fSlug}.labelSingular`,
 		});
 	}
 	if (field.description) {
 		field.description = localizeString(field.description, locale, {
-			key: `${parentKey}.fields.${fSlug}.description`,
 			...options,
+			key: `${parentKey}.fields.${fSlug}.description`,
 		});
 	}
 	if (field.placeholder) {
 		field.placeholder = localizeString(field.placeholder, locale, {
-			key: `${parentKey}.fields.${fSlug}.placeholder`,
 			...options,
+			key: `${parentKey}.fields.${fSlug}.placeholder`,
 		});
 	}
 	if (field.hint) {
 		field.hint = localizeString(field.hint, locale, {
-			key: `${parentKey}.fields.${fSlug}.hint`,
 			...options,
+			key: `${parentKey}.fields.${fSlug}.hint`,
 		});
 	}
 
@@ -314,8 +381,8 @@ function localizeSingleField(fld, parentKey, locale, options = {}) {
 		field.options = field.options.map((opt, idx) => {
 			if (typeof opt === "string") {
 				return localizeString(opt, locale, {
-					key: `${parentKey}.fields.${fSlug}.options.${idx}`,
 					...options,
+					key: `${parentKey}.fields.${fSlug}.options.${idx}`,
 				});
 			}
 			if (opt && typeof opt === "object") {
@@ -323,8 +390,8 @@ function localizeSingleField(fld, parentKey, locale, options = {}) {
 					...opt,
 					label: opt.label
 						? localizeString(opt.label, locale, {
-								key: `${parentKey}.fields.${fSlug}.options.${opt.value || idx}.label`,
 								...options,
+								key: `${parentKey}.fields.${fSlug}.options.${opt.value || idx}.label`,
 						  })
 						: opt.label,
 				};
@@ -339,16 +406,16 @@ function localizeSingleField(fld, parentKey, locale, options = {}) {
 			options: field.validation.options.map((opt, idx) => {
 				if (typeof opt === "string") {
 					return localizeString(opt, locale, {
-						key: `${parentKey}.fields.${fSlug}.options.${idx}`,
 						...options,
+						key: `${parentKey}.fields.${fSlug}.options.${idx}`,
 					});
 				}
 				if (opt && typeof opt === "object" && opt.label) {
 					return {
 						...opt,
 						label: localizeString(opt.label, locale, {
-							key: `${parentKey}.fields.${fSlug}.options.${opt.value || idx}.label`,
 							...options,
+							key: `${parentKey}.fields.${fSlug}.options.${opt.value || idx}.label`,
 						}),
 					};
 				}
@@ -407,7 +474,15 @@ export function localizeCollectionsResponse(data, locale, options = {}) {
 		return data.map((col) => localizeSingleCollection(col, locale, options));
 	}
 
-	if (data.slug && data.label) {
+	// Single item envelope: { item: collection }
+	if (data.item && typeof data.item === "object" && !Array.isArray(data.item)) {
+		return {
+			...data,
+			item: localizeSingleCollection(data.item, locale, options),
+		};
+	}
+
+	if (data.slug || data.label) {
 		return localizeSingleCollection(data, locale, options);
 	}
 
@@ -420,19 +495,19 @@ function localizeSingleCollection(col, locale, options = {}) {
 	const cSlug = c.slug || "unknown";
 
 	c.label = localizeString(c.label, locale, {
-		key: `collections.${cSlug}.label`,
 		...options,
+		key: `collections.${cSlug}.label`,
 	});
 	if (c.labelSingular) {
 		c.labelSingular = localizeString(c.labelSingular, locale, {
-			key: `collections.${cSlug}.labelSingular`,
 			...options,
+			key: `collections.${cSlug}.labelSingular`,
 		});
 	}
 	if (c.description) {
 		c.description = localizeString(c.description, locale, {
-			key: `collections.${cSlug}.description`,
 			...options,
+			key: `collections.${cSlug}.description`,
 		});
 	}
 

@@ -1,9 +1,14 @@
-import type { PluginDescriptor } from "emdash";
+import type { definePlugin, PluginDescriptor } from "emdash";
 
 export interface SchemaI18nOptions {
 	separator?: string;
+	splitBilingual?: boolean;
+	separatorLocales?: string[];
 	defaultLocale?: string;
 	dictionary?: Record<string, Record<string, string>>;
+	excludeSchemaEditor?: boolean;
+	localizeSchemaCollections?: boolean;
+	injectHtmlWatcher?: boolean;
 	autoReloadOnLocaleChange?: boolean;
 }
 
@@ -20,9 +25,14 @@ export declare const schemaI18n: typeof schemaLocalization;
 
 export declare function createPlugin(
 	options?: SchemaI18nOptions,
-): PluginDescriptor;
+): ReturnType<typeof definePlugin>;
 
 export declare function createLocalizationMiddleware(
+	options?: SchemaI18nOptions,
+): (context: any, next: () => Promise<Response>) => Promise<Response>;
+
+export declare function withSchemaLocalization(
+	existingOnRequest?: (context: any, next: () => Promise<Response>) => Promise<Response>,
 	options?: SchemaI18nOptions,
 ): (context: any, next: () => Promise<Response>) => Promise<Response>;
 
@@ -40,6 +50,8 @@ export declare function localizeString(
 		key?: string;
 		dictionary?: Record<string, Record<string, string>>;
 		separator?: string;
+		splitBilingual?: boolean;
+		separatorLocales?: string[];
 	},
 ): unknown;
 
@@ -49,6 +61,8 @@ export declare function localizeManifest<T = any>(
 	options?: {
 		dictionary?: Record<string, Record<string, string>>;
 		separator?: string;
+		splitBilingual?: boolean;
+		separatorLocales?: string[];
 	},
 ): T;
 
@@ -58,6 +72,19 @@ export declare function localizeBlockTypesResponse<T = any>(
 	options?: {
 		dictionary?: Record<string, Record<string, string>>;
 		separator?: string;
+		splitBilingual?: boolean;
+		separatorLocales?: string[];
+	},
+): T;
+
+export declare function localizeBlockTypeResponse<T = any>(
+	data: T,
+	locale: string,
+	options?: {
+		dictionary?: Record<string, Record<string, string>>;
+		separator?: string;
+		splitBilingual?: boolean;
+		separatorLocales?: string[];
 	},
 ): T;
 
@@ -67,6 +94,8 @@ export declare function localizeCollectionsResponse<T = any>(
 	options?: {
 		dictionary?: Record<string, Record<string, string>>;
 		separator?: string;
+		splitBilingual?: boolean;
+		separatorLocales?: string[];
 	},
 ): T;
 

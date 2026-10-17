@@ -73,11 +73,17 @@ let existingTranslations = {};
 if (fs.existsSync(outPath)) {
 	try {
 		const existingContent = fs.readFileSync(outPath, "utf-8");
-		const matches = existingContent.matchAll(/"((?:[^"\\]|\\.)+)"\s*:\s*"((?:[^"\\]|\\.)*)"/g);
+		const matches = existingContent.matchAll(/("((?:[^"\\]|\\.)+)")\s*:\s*("((?:[^"\\]|\\.)*)")/g);
 		for (const match of matches) {
-			const key = match[1].replace(/\\"/g, '"');
-			const val = match[2].replace(/\\"/g, '"');
-			existingTranslations[key] = val;
+			try {
+				const key = JSON.parse(match[1]);
+				const val = JSON.parse(match[3]);
+				existingTranslations[key] = val;
+			} catch {
+				const key = match[2].replace(/\\"/g, '"');
+				const val = match[4].replace(/\\"/g, '"');
+				existingTranslations[key] = val;
+			}
 		}
 	} catch (err) {
 		console.warn("Notice: Could not parse existing translation file, starting fresh:", err.message);
@@ -98,7 +104,7 @@ function processString(str, parentObj, key) {
 			extracted.set(en, existingTranslations[en] || uk);
 		}
 
-		if (cleanSeed && parentObj && key) {
+		if (cleanSeed && parentObj && key !== undefined) {
 			parentObj[key] = en;
 		}
 		return en;
@@ -120,15 +126,15 @@ const TARGET_KEYS = new Set([
 	"hint",
 ]);
 
-function deepWalk(val) {
+function deepWalk(val, parentKey = "") {
 	if (!val) return;
 	if (Array.isArray(val)) {
 		for (let i = 0; i < val.length; i++) {
 			const item = val[i];
-			if (typeof item === "string" && item.includes(" / ")) {
+			if (typeof item === "string" && (item.includes(" / ") || parentKey === "options")) {
 				val[i] = processString(item, val, i);
 			} else if (item && typeof item === "object") {
-				deepWalk(item);
+				deepWalk(item, parentKey);
 			}
 		}
 	} else if (typeof val === "object") {
@@ -136,7 +142,7 @@ function deepWalk(val) {
 			if (TARGET_KEYS.has(k) && typeof v === "string") {
 				processString(v, val, k);
 			} else if (typeof v === "object") {
-				deepWalk(v);
+				deepWalk(v, k);
 			}
 		}
 	}
@@ -152,6 +158,15 @@ if (Array.isArray(seed.collections)) {
 	deepWalk(seed.collections);
 } else if (seed.collections && typeof seed.collections === "object") {
 	deepWalk(seed.collections);
+}
+
+// 3. Process Menus
+if (Array.isArray(seed.menus)) {
+	for (const menu of seed.menus) {
+		if (menu && typeof menu === "object" && typeof menu.name === "string") {
+			processString(menu.name, menu, "name");
+		}
+	}
 }
 
 // Save cleaned seed if requested

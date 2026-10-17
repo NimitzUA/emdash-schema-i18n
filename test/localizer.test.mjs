@@ -212,11 +212,45 @@ test("localizeCollectionsResponse localizes collections in API response", () => 
 	const localizedUk = localizeCollectionsResponse(mockApi, "uk", { dictionary: dict });
 	assert.equal(localizedUk.data.items[0].label, "Кейси");
 	assert.equal(localizedUk.data.items[0].labelSingular, "Кейс");
+
+	// Single item envelope: { item: collection }
+	const singleColEnvelope = {
+		data: {
+			item: {
+				slug: "case_study",
+				label: "Case studies",
+				labelSingular: "Case study",
+			},
+		},
+	};
+	const localizedSingleUk = localizeCollectionsResponse(singleColEnvelope, "uk", { dictionary: dict });
+	assert.equal(localizedSingleUk.data.item.label, "Кейси");
+	assert.equal(localizedSingleUk.data.item.labelSingular, "Кейс");
 });
 
-test("createLocalizationMiddleware injects reload watcher script into admin HTML", async () => {
-	const { createLocalizationMiddleware, RELOAD_WATCHER_SCRIPT } = await import("../src/middleware.mjs");
-	const middleware = createLocalizationMiddleware();
+test("localizeString safely ignores Object.prototype keys like constructor and toString", () => {
+	const dict = {
+		uk: {
+			Title: "Заголовок",
+		},
+	};
+
+	assert.equal(localizeString("constructor", "uk", { dictionary: dict }), "constructor");
+	assert.equal(localizeString("toString", "uk", { dictionary: dict }), "toString");
+	assert.equal(localizeString("valueOf", "uk", { key: "constructor", dictionary: dict }), "valueOf");
+	assert.deepEqual(localizeString({ constructor: "foo" }, "uk", { dictionary: dict }), { constructor: "foo" });
+});
+
+test("resolveAdminLocale handles malformed percent-encoded cookies gracefully", () => {
+	const reqWithBadCookie = new Request("http://localhost:4321/_emdash/api/manifest", {
+		headers: { cookie: "emdash-locale=%E0%A4%A" },
+	});
+	assert.doesNotThrow(() => resolveAdminLocale(reqWithBadCookie));
+});
+
+test("createLocalizationMiddleware injects reload watcher script into admin HTML when injectHtmlWatcher: true", async () => {
+	const { createLocalizationMiddleware } = await import("../src/middleware.mjs");
+	const middleware = createLocalizationMiddleware({ injectHtmlWatcher: true });
 
 	const mockContext = {
 		url: new URL("http://localhost:4321/_emdash/admin/settings"),
@@ -236,6 +270,3 @@ test("createLocalizationMiddleware injects reload watcher script into admin HTML
 	assert.ok(text.includes("MutationObserver"));
 	assert.ok(text.endsWith("</body></html>"));
 });
-
-
-

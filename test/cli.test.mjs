@@ -208,3 +208,51 @@ export const adminDictionary = {
 	fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+test("CLI extract handles escaped characters without double-escaping and extracts menus and string options", async () => {
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "emdash-cli-test-"));
+	const seedPath = path.join(tmpDir, "seed.json");
+	const outTsPath = path.join(tmpDir, "admin.ts");
+
+	const seed = {
+		collections: [
+			{
+				label: "Articles",
+				fields: [
+					{
+						slug: "status",
+						label: "Status",
+						options: ["Draft", "Published"],
+					},
+				],
+			},
+		],
+		menus: [
+			{
+				slug: "main",
+				name: "Головне меню / Main Menu",
+			},
+		],
+	};
+	fs.writeFileSync(seedPath, JSON.stringify(seed, null, 2), "utf-8");
+
+	const initialTs = `export const adminDictionary = {
+	uk: {
+		"Articles": "Статті з \\"лапками\\"\\nі переносом",
+	},
+};
+`;
+	fs.writeFileSync(outTsPath, initialTs, "utf-8");
+
+	// Run extract twice to ensure backslashes and newlines are not double-escaped
+	await execFileAsync("node", [cliPath, "extract", `--seed=${seedPath}`, `--out=${outTsPath}`]);
+	await execFileAsync("node", [cliPath, "extract", `--seed=${seedPath}`, `--out=${outTsPath}`]);
+
+	const updatedTs = fs.readFileSync(outTsPath, "utf-8");
+	assert.ok(updatedTs.includes('"Articles": "Статті з \\"лапками\\"\\nі переносом"'));
+	assert.ok(updatedTs.includes('"Main Menu": "Головне меню"'));
+	assert.ok(updatedTs.includes('"Draft": ""'));
+	assert.ok(updatedTs.includes('"Published": ""'));
+
+	fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+

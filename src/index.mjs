@@ -1,16 +1,23 @@
 import { definePlugin } from "emdash";
-import { createLocalizationMiddleware, RELOAD_WATCHER_SCRIPT } from "./middleware.mjs";
+import pkg from "../package.json" with { type: "json" };
+import {
+	createLocalizationMiddleware,
+	withSchemaLocalization,
+	RELOAD_WATCHER_SCRIPT,
+} from "./middleware.mjs";
 import {
 	localizeManifest,
 	localizeBlockTypesResponse,
+	localizeBlockTypeResponse,
 	localizeCollectionsResponse,
 	localizeString,
 	resolveAdminLocale,
+	normalizeLocale,
 } from "./localizer.mjs";
 
 const pluginId = "schema-i18n";
 const pluginName = "Schema & Blocks i18n";
-const version = "1.1.1";
+const version = pkg.version;
 const description = "Dynamic schema, collections, and block types localization for EmDash CMS Admin UI";
 const author = "Serhii Parshyn";
 const packageEntrypoint = "emdash-schema-i18n";
@@ -41,26 +48,28 @@ export function schemaLocalization(options = {}) {
 export const customLocalization = schemaLocalization;
 export const schemaI18n = schemaLocalization;
 
-export function createPlugin(options = {}) {
+export function createPlugin(_options = {}) {
 	return definePlugin({
 		id: pluginId,
-		name: pluginName,
 		version,
 		capabilities: [],
 		admin: {
-			entry: adminEntrypoint,
+			adminEntry: adminEntrypoint,
 		},
 	});
 }
 
 export {
 	createLocalizationMiddleware,
+	withSchemaLocalization,
 	RELOAD_WATCHER_SCRIPT,
 	localizeManifest,
 	localizeBlockTypesResponse,
+	localizeBlockTypeResponse,
 	localizeCollectionsResponse,
 	localizeString,
 	resolveAdminLocale,
+	normalizeLocale,
 };
 
 export default schemaLocalization;

@@ -12,7 +12,12 @@ export const RELOAD_WATCHER_SCRIPT = `<script id="emdash-i18n-watcher">
 	let currentLang = document.documentElement.getAttribute("lang") || "";
 	const observer = new MutationObserver(() => {
 		const newLang = document.documentElement.getAttribute("lang") || "";
-		if (newLang && currentLang && newLang !== currentLang) {
+		if (!newLang) return;
+		if (!currentLang) {
+			currentLang = newLang;
+			return;
+		}
+		if (newLang !== currentLang) {
 			currentLang = newLang;
 			setTimeout(() => { window.location.reload(); }, 60);
 		}
@@ -21,31 +26,91 @@ export const RELOAD_WATCHER_SCRIPT = `<script id="emdash-i18n-watcher">
 })();
 </script>`;
 
+function mergeVaryHeader(headers) {
+	const existingVary = headers.get("Vary");
+	if (!existingVary) {
+		headers.set("Vary", "Cookie, Accept-Language");
+		return;
+	}
+	const tokens = new Set(
+		existingVary
+			.split(",")
+			.map((s) => s.trim().toLowerCase())
+			.filter(Boolean),
+	);
+	const toAdd = [];
+	if (!tokens.has("cookie")) toAdd.push("Cookie");
+	if (!tokens.has("accept-language")) toAdd.push("Accept-Language");
+	if (toAdd.length > 0) {
+		headers.set("Vary", `${existingVary}, ${toAdd.join(", ")}`);
+	}
+}
+
+function resolvePathname(context) {
+	if (context?.url?.pathname) return context.url.pathname;
+	if (context?.request?.url) {
+		try {
+			return new URL(context.request.url).pathname;
+		} catch {
+			return "";
+		}
+	}
+	return "";
+}
+
 /**
- * Creates an Astro middleware handler that intercepts `/_emdash/api/manifest`,
- * `/_emdash/api/schema/block-types`, and `/_emdash/api/schema/collections`
- * and dynamically localizes the schema JSON according to the admin session language,
- * and injects an auto-reload watcher on admin HTML pages so switching languages
- * immediately refreshes schema and block types.
+ * Creates an Astro middleware handler that intercepts `/_emdash/api/manifest`
+ * and `/_emdash/api/schema/block-types` and dynamically localizes the schema JSON
+ * according to the admin session language.
  *
  * @param {object} [options]
  * @param {Record<string, Record<string, string>>} [options.dictionary]
  * @param {string} [options.separator=" / "]
+ * @param {boolean} [options.splitBilingual=true]
+ * @param {string[]} [options.separatorLocales=["uk", "en"]]
  * @param {string} [options.defaultLocale="en"]
- * @param {boolean} [options.autoReloadOnLocaleChange=true]
+ * @param {boolean} [options.excludeSchemaEditor=true] Protects Schema Editor (Content Types) from receiving translated labels.
+ * @param {boolean} [options.localizeSchemaCollections=false] Explicitly allow localizing /schema/collections.
+ * @param {boolean} [options.injectHtmlWatcher=false] Inject inline watcher script into admin HTML (unnecessary when adminEntry is loaded).
+ * @param {boolean} [options.autoReloadOnLocaleChange] Deprecated alias for injectHtmlWatcher.
  * @returns {(context: any, next: () => Promise<Response>) => Promise<Response>}
  */
 export function createLocalizationMiddleware(options = {}) {
-	const { defaultLocale = "en", autoReloadOnLocaleChange = true } = options;
+	const {
+		defaultLocale = "en",
+		excludeSchemaEditor = true,
+		localizeSchemaCollections = false,
+		injectHtmlWatcher = options.autoReloadOnLocaleChange ?? false,
+	} = options;
 
 	return async function localizationMiddleware(context, next) {
+		// 1. Process only GET and HEAD requests to prevent mutating writes (POST/PUT/PATCH/DELETE)
+		const method = context.request?.method || "GET";
+		if (method !== "GET" && method !== "HEAD") {
+			return next();
+		}
+
 		const response = await next();
 
+		// HEAD requests have no response body to transform
+		if (method === "HEAD") {
+			return response;
+		}
+
 		if (response?.status >= 200 && response?.status < 300) {
-			const pathname = context.url.pathname;
+			const pathname = resolvePathname(context);
 			const isManifest = pathname === "/_emdash/api/manifest";
-			const isBlockTypes = pathname === "/_emdash/api/schema/block-types";
-			const isCollections = pathname.startsWith("/_emdash/api/schema/collections");
+			const isBlockTypes =
+				pathname === "/_emdash/api/schema/block-types" ||
+				pathname.startsWith("/_emdash/api/schema/block-types/");
+
+			// Schema editor protection: avoid localizing /schema/collections unless explicitly opted in
+			const shouldLocalizeCollections =
+				!excludeSchemaEditor || localizeSchemaCollections;
+			const isCollections =
+				shouldLocalizeCollections &&
+				(pathname === "/_emdash/api/schema/collections" ||
+					pathname.startsWith("/_emdash/api/schema/collections/"));
 
 			if (isManifest || isBlockTypes || isCollections) {
 				try {
@@ -63,7 +128,9 @@ export function createLocalizationMiddleware(options = {}) {
 
 					const headers = new Headers(response.headers);
 					headers.set("Content-Type", "application/json; charset=utf-8");
-					headers.set("Vary", "Cookie, Accept-Language");
+					headers.delete("etag");
+					headers.delete("content-length");
+					mergeVaryHeader(headers);
 
 					return new Response(JSON.stringify(localized), {
 						status: response.status,
@@ -77,7 +144,7 @@ export function createLocalizationMiddleware(options = {}) {
 			}
 
 			if (
-				autoReloadOnLocaleChange &&
+				injectHtmlWatcher &&
 				pathname.startsWith("/_emdash/admin") &&
 				response.headers.get("content-type")?.includes("text/html")
 			) {
@@ -85,11 +152,12 @@ export function createLocalizationMiddleware(options = {}) {
 					const resClone = response.clone();
 					const html = await resClone.text();
 					if (!html.includes('id="emdash-i18n-watcher"')) {
-						const injectedHtml = html.includes("</body>")
-							? html.replace("</body>", `${RELOAD_WATCHER_SCRIPT}</body>`)
+						const injectedHtml = /<\/body>/i.test(html)
+							? html.replace(/<\/body>/i, (match) => `${RELOAD_WATCHER_SCRIPT}${match}`)
 							: `${html}${RELOAD_WATCHER_SCRIPT}`;
 						const headers = new Headers(response.headers);
 						headers.delete("content-length");
+						headers.delete("etag");
 						return new Response(injectedHtml, {
 							status: response.status,
 							statusText: response.statusText,
@@ -103,6 +171,25 @@ export function createLocalizationMiddleware(options = {}) {
 		}
 
 		return response;
+	};
+}
+
+/**
+ * Helper to compose localization middleware with an existing middleware handler.
+ *
+ * @param {Function} [existingOnRequest] An existing Astro onRequest middleware handler.
+ * @param {object} [options] Schema localization options.
+ * @returns {Function} Combined Astro middleware handler.
+ */
+export function withSchemaLocalization(existingOnRequest, options = {}) {
+	const localizationMiddleware = createLocalizationMiddleware(options);
+
+	if (typeof existingOnRequest !== "function") {
+		return localizationMiddleware;
+	}
+
+	return async function chainedMiddleware(context, next) {
+		return existingOnRequest(context, () => localizationMiddleware(context, next));
 	};
 }
 

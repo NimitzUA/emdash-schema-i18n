@@ -38,9 +38,13 @@
       "import": "./src/index.mjs"
     },
     "./middleware": {
+      "types": "./src/middleware.d.mts",
       "import": "./src/middleware.mjs"
     },
-    "./admin": "./src/admin/index.tsx"
+    "./admin": {
+      "types": "./src/admin/index.d.ts",
+      "import": "./src/admin/index.js"
+    }
   },
   "files": [
     "src",
@@ -50,6 +54,8 @@
     "LICENSE"
   ],
   "scripts": {
+    "build": "tsc src/admin/index.tsx --jsx react-jsx --target ES2022 --module NodeNext --moduleResolution NodeNext --strict --skipLibCheck --declaration --outDir src/admin",
+    "prepack": "npm run build",
     "test": "node --test test/*.test.mjs",
     "test:live": "node --test test/e2e-live.test.mjs",
     "example:init": "cd example && npx emdash secrets generate --write .env && npx emdash init && npx emdash seed seed/seed.json --on-conflict=update",
@@ -61,6 +67,8 @@
   },
   "peerDependencies": {
     "@emdash-cms/admin": ">=1.2.0",
+    "@lingui/react": ">=4.0.0",
+    "astro": ">=6.0.0",
     "emdash": ">=1.0.1",
     "react": ">=18.0.0",
     "react-dom": ">=18.0.0"

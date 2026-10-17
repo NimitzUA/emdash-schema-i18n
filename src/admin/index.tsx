@@ -70,7 +70,12 @@ if (
 	let currentLang = document.documentElement.getAttribute("lang") || "";
 	const observer = new MutationObserver(() => {
 		const newLang = document.documentElement.getAttribute("lang") || "";
-		if (newLang && currentLang && newLang !== currentLang) {
+		if (!newLang) return;
+		if (!currentLang) {
+			currentLang = newLang;
+			return;
+		}
+		if (newLang !== currentLang) {
 			currentLang = newLang;
 			setTimeout(() => {
 				window.location.reload();

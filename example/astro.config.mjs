@@ -4,7 +4,6 @@ import react from "@astrojs/react";
 import emdash, { local } from "emdash/astro";
 import { sqlite } from "emdash/db";
 import { schemaLocalization } from "../src/index.mjs";
-import { adminDictionary } from "./src/i18n/admin.ts";
 
 export default defineConfig({
   output: "server",
@@ -38,9 +37,7 @@ export default defineConfig({
         baseUrl: "/_emdash/api/media/file",
       }),
       plugins: [
-        schemaLocalization({
-          dictionary: adminDictionary,
-        }),
+        schemaLocalization(),
       ],
     }),
   ],

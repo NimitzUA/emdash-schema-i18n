@@ -4,5 +4,6 @@ import { adminDictionary } from "./i18n/admin.ts";
 export const onRequest = createLocalizationMiddleware({
   dictionary: adminDictionary,
   defaultLocale: "en",
-  autoReloadOnLocaleChange: true,
+  injectHtmlWatcher: true,
+  localizeSchemaCollections: true,
 });
