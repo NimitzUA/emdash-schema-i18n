@@ -308,3 +308,24 @@ test("CLI extract supports --locale flag and preserves other existing locales in
 	fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+test("CLI rejects unknown commands and flags with non-zero exit code", async () => {
+	await assert.rejects(
+		execFileAsync("node", [cliPath, "unknown-cmd"]),
+		(err) => {
+			assert.equal(err.code, 1);
+			assert.ok(err.stderr.includes('Unknown command "unknown-cmd"'));
+			return true;
+		},
+	);
+
+	await assert.rejects(
+		execFileAsync("node", [cliPath, "extract", "--unknown-flag"]),
+		(err) => {
+			assert.equal(err.code, 1);
+			assert.ok(err.stderr.includes('Unknown option "--unknown-flag"'));
+			return true;
+		},
+	);
+});
+
+

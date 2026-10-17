@@ -1,6 +1,10 @@
 import * as React from "react";
 import { useLingui } from "@lingui/react";
-import { localizeString, installLocaleReloadWatcher } from "../localizer.mjs";
+import {
+	localizeString,
+	normalizeLocale,
+	installLocaleReloadWatcher,
+} from "../localizer.mjs";
 
 const DEFAULT_SEPARATOR = " / ";
 
@@ -8,6 +12,8 @@ export interface LocalizeTextOptions {
 	separator?: string;
 	key?: string;
 	dictionary?: Record<string, Record<string, string>>;
+	splitBilingual?: boolean;
+	separatorLocales?: string[];
 }
 
 /**
@@ -16,7 +22,7 @@ export interface LocalizeTextOptions {
 export function useAdminLocale(): string {
 	try {
 		const { i18n } = useLingui();
-		return i18n.locale || "en";
+		return normalizeLocale(i18n.locale || "en");
 	} catch {
 		return "en";
 	}
@@ -30,12 +36,27 @@ export function useLocalizedText(
 	options: LocalizeTextOptions | string = DEFAULT_SEPARATOR,
 ): string {
 	const locale = useAdminLocale();
+	const opts: LocalizeTextOptions =
+		typeof options === "string" ? { separator: options } : options;
+	const {
+		separator,
+		key,
+		dictionary,
+		splitBilingual,
+		separatorLocales,
+	} = opts;
 
 	return React.useMemo(() => {
-		const opts: LocalizeTextOptions =
-			typeof options === "string" ? { separator: options } : options;
-		return String(localizeString(text, locale, opts) ?? "");
-	}, [text, locale, options]);
+		return String(
+			localizeString(text, locale, {
+				separator,
+				key,
+				dictionary,
+				splitBilingual,
+				separatorLocales,
+			}) ?? "",
+		);
+	}, [text, locale, separator, key, dictionary, splitBilingual, separatorLocales]);
 }
 
 /**
@@ -46,16 +67,22 @@ export function LocalizedText({
 	separator = DEFAULT_SEPARATOR,
 	dictionary,
 	translationKey,
+	splitBilingual,
+	separatorLocales,
 }: {
 	children: string;
 	separator?: string;
 	dictionary?: Record<string, Record<string, string>>;
 	translationKey?: string;
+	splitBilingual?: boolean;
+	separatorLocales?: string[];
 }) {
 	const localized = useLocalizedText(children, {
 		separator,
 		dictionary,
 		key: translationKey,
+		splitBilingual,
+		separatorLocales,
 	});
 	return <>{localized}</>;
 }

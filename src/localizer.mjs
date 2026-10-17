@@ -108,22 +108,41 @@ export function resolveAdminLocale(request, defaultLocale = "en") {
 
 	const acceptLanguage = request.headers.get("accept-language");
 	if (acceptLanguage) {
-		const firstLang = acceptLanguage.split(",")[0]?.split(";")[0]?.trim();
-		if (firstLang) return normalizeLocale(firstLang);
+		const candidates = acceptLanguage
+			.split(",")
+			.map((entry, idx) => {
+				const [rawLang, ...params] = entry.trim().split(";");
+				const lang = rawLang?.trim();
+				let q = 1;
+				for (const param of params) {
+					const [k, v] = param.trim().split("=");
+					if (k === "q" && v !== undefined) {
+						const parsed = Number.parseFloat(v);
+						if (!Number.isNaN(parsed)) q = parsed;
+					}
+				}
+				return { lang, q, idx };
+			})
+			.filter((item) => item.lang && item.lang !== "*" && item.q > 0)
+			.sort((a, b) => b.q - a.q || a.idx - b.idx);
+
+		if (candidates.length > 0) {
+			return normalizeLocale(candidates[0].lang);
+		}
 	}
 
 	return defaultLocale;
 }
 
 /**
- * Normalizes locale code to base language (e.g. "uk-UA" -> "uk", "en-US" -> "en").
+ * Normalizes locale code to base language (e.g. "uk-UA" -> "uk", "uk_UA" -> "uk", "en-US" -> "en").
  *
  * @param {string} code
  * @returns {string}
  */
 export function normalizeLocale(code) {
 	if (!code) return "en";
-	return code.toLowerCase().split("-")[0] || code.toLowerCase();
+	return code.toLowerCase().split(/[-_]/)[0] || code.toLowerCase();
 }
 
 /**
@@ -426,6 +445,36 @@ function localizeManifestPlugin(pluginDef, pluginId, locale, options) {
 				options,
 			);
 			return b;
+		});
+	}
+
+	if (Array.isArray(p.editorPanels)) {
+		p.editorPanels = p.editorPanels.map((panel, idx) => {
+			if (!panel || typeof panel !== "object") return panel;
+			const ep = { ...panel };
+			localizeObjectProps(
+				ep,
+				["label", "title", "description"],
+				`${prefix}.editorPanels.${ep.id || ep.name || idx}`,
+				locale,
+				options,
+			);
+			return ep;
+		});
+	}
+
+	if (Array.isArray(p.editorActions)) {
+		p.editorActions = p.editorActions.map((action, idx) => {
+			if (!action || typeof action !== "object") return action;
+			const ea = { ...action };
+			localizeObjectProps(
+				ea,
+				["label", "title", "description"],
+				`${prefix}.editorActions.${ea.id || ea.name || idx}`,
+				locale,
+				options,
+			);
+			return ea;
 		});
 	}
 

@@ -294,6 +294,8 @@ test("localizeManifest localizes collection group, taxonomies, and plugin UI con
 				dashboardWidgets: [{ id: "stats", title: "Traffic Overview" }],
 				fieldWidgets: [{ name: "color", label: "Color Picker" }],
 				portableTextBlocks: [{ type: "alert", label: "Alert Box", description: "Warning callout" }],
+				editorPanels: [{ id: "seo-panel", label: "SEO Panel", title: "SEO Checklist" }],
+				editorActions: [{ id: "publish-seo", label: "Run SEO Audit" }],
 			},
 		},
 	};
@@ -310,6 +312,9 @@ test("localizeManifest localizes collection group, taxonomies, and plugin UI con
 			"Color Picker": "Вибір кольору",
 			"Alert Box": "Блок сповіщення",
 			"Warning callout": "Попереджувальна плашка",
+			"SEO Panel": "Панель SEO",
+			"SEO Checklist": "Чекліст SEO",
+			"Run SEO Audit": "Запустити SEO-аудит",
 		},
 	};
 
@@ -323,5 +328,16 @@ test("localizeManifest localizes collection group, taxonomies, and plugin UI con
 	assert.equal(localized.plugins.seo.fieldWidgets[0].label, "Вибір кольору");
 	assert.equal(localized.plugins.seo.portableTextBlocks[0].label, "Блок сповіщення");
 	assert.equal(localized.plugins.seo.portableTextBlocks[0].description, "Попереджувальна плашка");
+	assert.equal(localized.plugins.seo.editorPanels[0].label, "Панель SEO");
+	assert.equal(localized.plugins.seo.editorPanels[0].title, "Чекліст SEO");
+	assert.equal(localized.plugins.seo.editorActions[0].label, "Запустити SEO-аудит");
 });
+
+test("resolveAdminLocale respects Accept-Language quality weights and POSIX underscore locales", () => {
+	const reqWithWeights = new Request("http://localhost:4321/_emdash/api/manifest", {
+		headers: { "accept-language": "*;q=0.1, en_US;q=0.7, uk_UA;q=0.9" },
+	});
+	assert.equal(resolveAdminLocale(reqWithWeights), "uk");
+});
+
 

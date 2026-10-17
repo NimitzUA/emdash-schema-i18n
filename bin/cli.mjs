@@ -34,15 +34,23 @@ Options:
 
 const cwd = process.cwd();
 
-// Resolve seed path
+// Validate positional command and parse flags
 let seedPath = "";
 let outPath = "";
 let targetLocale = "uk";
 
 for (const arg of args) {
-	if (arg.startsWith("--seed=")) seedPath = path.resolve(cwd, arg.split("=")[1]);
-	else if (arg.startsWith("--out=")) outPath = path.resolve(cwd, arg.split("=")[1]);
-	else if (arg.startsWith("--locale=")) targetLocale = arg.split("=")[1].trim() || "uk";
+	if (arg.startsWith("--seed=")) seedPath = path.resolve(cwd, arg.slice("--seed=".length));
+	else if (arg.startsWith("--out=")) outPath = path.resolve(cwd, arg.slice("--out=".length));
+	else if (arg.startsWith("--locale=")) targetLocale = arg.slice("--locale=".length).trim() || "uk";
+	else if (arg === "--clean-seed" || arg === "-h" || arg === "--help") continue;
+	else if (arg.startsWith("-")) {
+		console.error(`Error: Unknown option "${arg}". Run with --help for usage.`);
+		process.exit(1);
+	} else if (arg !== "extract") {
+		console.error(`Error: Unknown command "${arg}". Supported commands: extract.`);
+		process.exit(1);
+	}
 }
 
 if (!seedPath) {
@@ -267,9 +275,9 @@ if (isJson) {
 	const otherLocaleBlocks = [];
 	for (const [loc, entries] of Object.entries(existingMultiLocaleDict)) {
 		if (loc === targetLocale || !entries || typeof entries !== "object") continue;
-		const lines = Object.entries(entries).map(
-			([k, v]) => `\t\t${JSON.stringify(k)}: ${JSON.stringify(v)},`,
-		);
+		const lines = Object.keys(entries)
+			.sort((a, b) => a.localeCompare(b))
+			.map((k) => `\t\t${JSON.stringify(k)}: ${JSON.stringify(entries[k])},`);
 		const safeLocKey = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(loc) ? loc : JSON.stringify(loc);
 		otherLocaleBlocks.push(`\t${safeLocKey}: {\n${lines.join("\n")}\n\t},`);
 	}

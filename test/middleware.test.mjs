@@ -305,3 +305,25 @@ test("schemaLocalization and createPlugin return valid EmDash descriptor and res
 	assert.equal(resolved.admin.adminEntry, "emdash-schema-i18n/admin");
 });
 
+test("middleware skips JSON parsing if schema endpoint returns non-JSON content-type", async () => {
+	const middleware = createLocalizationMiddleware({
+		dictionary: { uk: { Test: "Тест" } },
+	});
+
+	const request = new Request("http://localhost:4321/_emdash/api/manifest", {
+		method: "GET",
+		headers: { "Cookie": "emdash-locale=uk" },
+	});
+
+	const response = await middleware({ request }, async () => {
+		return new Response("<html><body>Login Required</body></html>", {
+			status: 200,
+			headers: { "Content-Type": "text/html; charset=utf-8" },
+		});
+	});
+
+	assert.equal(response.status, 200);
+	assert.equal(await response.text(), "<html><body>Login Required</body></html>");
+});
+
+

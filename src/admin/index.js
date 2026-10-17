@@ -1,7 +1,7 @@
 import { Fragment as _Fragment, jsx as _jsx } from "react/jsx-runtime";
 import * as React from "react";
 import { useLingui } from "@lingui/react";
-import { localizeString, installLocaleReloadWatcher } from "../localizer.mjs";
+import { localizeString, normalizeLocale, installLocaleReloadWatcher, } from "../localizer.mjs";
 const DEFAULT_SEPARATOR = " / ";
 /**
  * Hook to retrieve the active admin UI locale.
@@ -9,7 +9,7 @@ const DEFAULT_SEPARATOR = " / ";
 export function useAdminLocale() {
     try {
         const { i18n } = useLingui();
-        return i18n.locale || "en";
+        return normalizeLocale(i18n.locale || "en");
     }
     catch {
         return "en";
@@ -20,19 +20,28 @@ export function useAdminLocale() {
  */
 export function useLocalizedText(text, options = DEFAULT_SEPARATOR) {
     const locale = useAdminLocale();
+    const opts = typeof options === "string" ? { separator: options } : options;
+    const { separator, key, dictionary, splitBilingual, separatorLocales, } = opts;
     return React.useMemo(() => {
-        const opts = typeof options === "string" ? { separator: options } : options;
-        return String(localizeString(text, locale, opts) ?? "");
-    }, [text, locale, options]);
+        return String(localizeString(text, locale, {
+            separator,
+            key,
+            dictionary,
+            splitBilingual,
+            separatorLocales,
+        }) ?? "");
+    }, [text, locale, separator, key, dictionary, splitBilingual, separatorLocales]);
 }
 /**
  * Component that renders localized text for the active admin locale.
  */
-export function LocalizedText({ children, separator = DEFAULT_SEPARATOR, dictionary, translationKey, }) {
+export function LocalizedText({ children, separator = DEFAULT_SEPARATOR, dictionary, translationKey, splitBilingual, separatorLocales, }) {
     const localized = useLocalizedText(children, {
         separator,
         dictionary,
         key: translationKey,
+        splitBilingual,
+        separatorLocales,
     });
     return _jsx(_Fragment, { children: localized });
 }

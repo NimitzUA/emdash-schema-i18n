@@ -100,6 +100,10 @@ export function createLocalizationMiddleware(options = {}) {
 					pathname.startsWith("/_emdash/api/schema/collections/"));
 
 			if (isManifest || isBlockTypes || isCollections) {
+				const contentType = response.headers.get("content-type") || "";
+				if (contentType && !contentType.includes("json")) {
+					return response;
+				}
 				try {
 					const locale = resolveAdminLocale(context.request, defaultLocale);
 					const data = await response.clone().json();
