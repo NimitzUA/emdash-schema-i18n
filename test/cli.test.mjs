@@ -1,0 +1,210 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
+const cliPath = path.resolve("bin/cli.mjs");
+
+test("CLI --help displays usage", async () => {
+	const { stdout } = await execFileAsync("node", [cliPath, "--help"]);
+	assert.ok(stdout.includes("Usage: emdash-schema-i18n"));
+	assert.ok(stdout.includes("extract"));
+	assert.ok(stdout.includes("--clean-seed"));
+});
+
+test("CLI errors gracefully if seed file is missing", async () => {
+	try {
+		await execFileAsync("node", [cliPath, "extract", "--seed=non_existent_seed_123.json"]);
+		assert.fail("CLI should have exited with non-zero exit code");
+	} catch (err) {
+		assert.equal(err.code, 1);
+		assert.ok(err.stderr.includes("Error: Seed file not found"));
+	}
+});
+
+test("CLI extract parses bilingual strings and generates admin.ts", async () => {
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "emdash-cli-test-"));
+	const seedPath = path.join(tmpDir, "seed.json");
+	const outPath = path.join(tmpDir, "admin.ts");
+
+	const sampleSeed = {
+		version: "1",
+		collections: [
+			{
+				slug: "case_studies",
+				label: "Кейси / Case studies",
+				labelSingular: "Кейс / Case study",
+				fields: [
+					{ slug: "title", label: "Заголовок / Title" },
+					{ slug: "content", label: "Content" },
+				],
+			},
+		],
+		blockTypes: [
+			{
+				slug: "quote",
+				label: "Цитата / Quote",
+				category: "Текст / Text",
+				versions: [
+					{
+						version: 1,
+						fields: [{ slug: "attribution", label: "Підпис автора / Attribution" }],
+					},
+				],
+			},
+		],
+	};
+
+	fs.writeFileSync(seedPath, JSON.stringify(sampleSeed, null, 2), "utf-8");
+
+	const { stdout } = await execFileAsync("node", [
+		cliPath,
+		"extract",
+		`--seed=${seedPath}`,
+		`--out=${outPath}`,
+	]);
+
+	assert.ok(stdout.includes("Total strings:"));
+	assert.ok(fs.existsSync(outPath));
+
+	const generatedTs = fs.readFileSync(outPath, "utf-8");
+	assert.ok(generatedTs.includes('"Case studies": "Кейси"'));
+	assert.ok(generatedTs.includes('"Case study": "Кейс"'));
+	assert.ok(generatedTs.includes('"Title": "Заголовок"'));
+	assert.ok(generatedTs.includes('"Quote": "Цитата"'));
+	assert.ok(generatedTs.includes('"Text": "Текст"'));
+	assert.ok(generatedTs.includes('"Attribution": "Підпис автора"'));
+	assert.ok(generatedTs.includes('"Content": "", // TODO: translate'));
+
+	// Seed file must not be modified when --clean-seed is not specified
+	const rawSeedAfter = JSON.parse(fs.readFileSync(seedPath, "utf-8"));
+	assert.equal(rawSeedAfter.collections[0].label, "Кейси / Case studies");
+
+	fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test("CLI extract --clean-seed strips bilingual slashes in place", async () => {
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "emdash-cli-test-"));
+	const seedPath = path.join(tmpDir, "seed.json");
+	const outPath = path.join(tmpDir, "admin.ts");
+
+	const sampleSeed = {
+		version: "1",
+		collections: [
+			{
+				slug: "articles",
+				label: "Статті / Articles",
+				labelSingular: "Стаття / Article",
+				fields: [{ slug: "title", label: "Заголовок / Title" }],
+			},
+		],
+		blockTypes: [
+			{
+				slug: "hero",
+				label: "Банер / Hero Banner",
+				category: "Макет / Layout",
+			},
+		],
+	};
+
+	fs.writeFileSync(seedPath, JSON.stringify(sampleSeed, null, 2), "utf-8");
+
+	await execFileAsync("node", [
+		cliPath,
+		"extract",
+		`--seed=${seedPath}`,
+		`--out=${outPath}`,
+		"--clean-seed",
+	]);
+
+	// Verify cleaned seed file
+	const cleanedSeed = JSON.parse(fs.readFileSync(seedPath, "utf-8"));
+	assert.equal(cleanedSeed.collections[0].label, "Articles");
+	assert.equal(cleanedSeed.collections[0].labelSingular, "Article");
+	assert.equal(cleanedSeed.collections[0].fields[0].label, "Title");
+	assert.equal(cleanedSeed.blockTypes[0].label, "Hero Banner");
+	assert.equal(cleanedSeed.blockTypes[0].category, "Layout");
+
+	// Verify generated dictionary
+	const generatedTs = fs.readFileSync(outPath, "utf-8");
+	assert.ok(generatedTs.includes('"Articles": "Статті"'));
+	assert.ok(generatedTs.includes('"Article": "Стаття"'));
+	assert.ok(generatedTs.includes('"Hero Banner": "Банер"'));
+	assert.ok(generatedTs.includes('"Layout": "Макет"'));
+
+	fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test("CLI extract preserves existing translations and supports JSON output", async () => {
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "emdash-cli-test-"));
+	const seedPath = path.join(tmpDir, "seed.json");
+	const outTsPath = path.join(tmpDir, "admin.ts");
+	const outJsonPath = path.join(tmpDir, "admin.json");
+
+	const seed1 = {
+		collections: [
+			{
+				label: "Projects",
+				fields: [{ label: "Title" }],
+			},
+		],
+	};
+	fs.writeFileSync(seedPath, JSON.stringify(seed1, null, 2), "utf-8");
+
+	// First run
+	await execFileAsync("node", [cliPath, "extract", `--seed=${seedPath}`, `--out=${outTsPath}`]);
+
+	// Simulate user filling in translations in admin.ts
+	const customAdminTs = `
+export const adminDictionary = {
+	uk: {
+		"Projects": "Проєкти",
+		"Title": "Назва",
+	},
+};
+`;
+	fs.writeFileSync(outTsPath, customAdminTs, "utf-8");
+
+	// Add new untranslated field to seed
+	const seed2 = {
+		collections: [
+			{
+				label: "Projects",
+				fields: [
+					{ label: "Title" },
+					{ label: "Description" },
+				],
+			},
+		],
+	};
+	fs.writeFileSync(seedPath, JSON.stringify(seed2, null, 2), "utf-8");
+
+	// Second run with TS
+	await execFileAsync("node", [cliPath, "extract", `--seed=${seedPath}`, `--out=${outTsPath}`]);
+	const updatedTs = fs.readFileSync(outTsPath, "utf-8");
+	assert.ok(updatedTs.includes('"Projects": "Проєкти"'));
+	assert.ok(updatedTs.includes('"Title": "Назва"'));
+	assert.ok(updatedTs.includes('"Description": "", // TODO: translate'));
+
+	// Test JSON output format with existing JSON translations
+	const initialJson = {
+		uk: {
+			Projects: "Проєкти",
+			Title: "Назва",
+		},
+	};
+	fs.writeFileSync(outJsonPath, JSON.stringify(initialJson, null, 2), "utf-8");
+
+	await execFileAsync("node", [cliPath, "extract", `--seed=${seedPath}`, `--out=${outJsonPath}`]);
+	const jsonContent = JSON.parse(fs.readFileSync(outJsonPath, "utf-8"));
+	assert.equal(jsonContent.uk["Projects"], "Проєкти");
+	assert.equal(jsonContent.uk["Title"], "Назва");
+	assert.equal(jsonContent.uk["Description"], "");
+
+	fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+

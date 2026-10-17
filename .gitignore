@@ -3,3 +3,9 @@ node_modules/
 dist/
 *.log
 .npm-cache/
+example/.astro/
+example/.env
+example/data.db*
+example/uploads/
+example/emdash-env.d.ts
+

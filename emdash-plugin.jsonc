@@ -10,5 +10,10 @@
   },
   "capabilities": [],
   "allowedHosts": [],
-  "storage": {}
+  "storage": {},
+  "release": {
+    "requires": {
+      "env:emdash": ">=1.0.1"
+    }
+  }
 }

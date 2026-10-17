@@ -82,12 +82,14 @@ export function createLocalizationMiddleware(options = {}) {
 				response.headers.get("content-type")?.includes("text/html")
 			) {
 				try {
-					const html = await response.text();
+					const resClone = response.clone();
+					const html = await resClone.text();
 					if (!html.includes('id="emdash-i18n-watcher"')) {
 						const injectedHtml = html.includes("</body>")
 							? html.replace("</body>", `${RELOAD_WATCHER_SCRIPT}</body>`)
 							: `${html}${RELOAD_WATCHER_SCRIPT}`;
 						const headers = new Headers(response.headers);
+						headers.delete("content-length");
 						return new Response(injectedHtml, {
 							status: response.status,
 							statusText: response.statusText,

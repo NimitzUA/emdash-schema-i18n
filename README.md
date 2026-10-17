@@ -28,6 +28,18 @@ In EmDash CMS, metadata for collections, fields, and block types (`label`, `labe
 
 ---
 
+## Compatibility & Requirements
+
+| Component | Supported Version | Notes |
+| :--- | :--- | :--- |
+| **EmDash CMS (`emdash`)** | `>= 1.0.1` | Tested up to `1.3.0+` |
+| **EmDash Admin (`@emdash-cms/admin`)** | `>= 1.2.0` | Required for admin UI |
+| **Astro** | `>= 6.0.0` | Supports Astro 6 and Astro 7 |
+| **Node.js** | `>= 22.16` | Required by EmDash runtime |
+| **React / React DOM** | `>= 18.0.0` | Fully supports React 18 & 19 |
+
+---
+
 ## Installation & Setup
 
 ### 1. In `astro.config.mjs`

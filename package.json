@@ -48,15 +48,22 @@
   ],
   "scripts": {
     "test": "node --test test/*.test.mjs",
+    "test:live": "node --test test/e2e-live.test.mjs",
+    "example:init": "cd example && npx emdash secrets generate --write .env && npx emdash init && npx emdash seed seed/seed.json --on-conflict=update",
+    "example:dev": "ASTRO_TELEMETRY_DISABLED=1 astro dev --root example --host 127.0.0.1 --port 4321",
     "typecheck": "tsc --noEmit"
   },
+  "engines": {
+    "node": ">=22.16"
+  },
   "peerDependencies": {
-    "@emdash-cms/admin": "^1.2.0",
-    "emdash": "^1.0.1",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "@emdash-cms/admin": ">=1.2.0",
+    "emdash": ">=1.0.1",
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0"
   },
   "devDependencies": {
+    "@astrojs/node": "^11.1.8",
     "@types/react": "^19.0.0",
     "typescript": "^5.0.0"
   }

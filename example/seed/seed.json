@@ -1,0 +1,88 @@
+{
+  "version": "1",
+  "collections": [
+    {
+      "slug": "articles",
+      "label": "Articles",
+      "labelSingular": "Article",
+      "description": "Company news and blog publications",
+      "fields": [
+        {
+          "slug": "title",
+          "label": "Article Title",
+          "type": "string",
+          "required": true
+        },
+        {
+          "slug": "article_type",
+          "label": "Article Type",
+          "type": "select",
+          "options": [
+            { "value": "news", "label": "News" },
+            { "value": "editorial", "label": "Editorial" }
+          ]
+        },
+        {
+          "slug": "body",
+          "label": "Page Content",
+          "type": "blocks",
+          "validation": {
+            "allowedTypes": ["hero_banner", "testimonial"]
+          }
+        }
+      ]
+    }
+  ],
+  "blockTypes": [
+    {
+      "slug": "hero_banner",
+      "label": "Hero Banner",
+      "category": "Marketing",
+      "description": "Large visual hero section with headline",
+      "currentVersion": 1,
+      "versions": [
+        {
+          "version": 1,
+          "fields": [
+            {
+              "slug": "headline",
+              "label": "Main Headline",
+              "type": "string",
+              "required": true
+            },
+            {
+              "slug": "subline",
+              "label": "Subline",
+              "type": "string"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "testimonial",
+      "label": "Client Testimonial",
+      "category": "Social Proof",
+      "description": "Quote card with client review and attribution",
+      "currentVersion": 1,
+      "versions": [
+        {
+          "version": 1,
+          "fields": [
+            {
+              "slug": "quote",
+              "label": "Quote Text",
+              "type": "text",
+              "required": true
+            },
+            {
+              "slug": "author",
+              "label": "Author Name",
+              "type": "string"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

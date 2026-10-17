@@ -1,0 +1,23 @@
+{
+  "name": "example-emdash-site",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "emdash": {
+    "seed": "seed/seed.json"
+  },
+  "dependencies": {
+    "astro": "^7.4.0",
+    "emdash": "^1.3.0",
+    "@astrojs/node": "^9.1.0",
+    "@astrojs/react": "^7.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "emdash-schema-i18n": "file:.."
+  },
+  "scripts": {
+    "dev": "astro dev --port 4321",
+    "build": "astro build",
+    "preview": "astro preview"
+  }
+}
