@@ -292,16 +292,21 @@ test("middleware resolves pathname from context.request.url when context.url is 
 	assert.equal(data.collections.blog.label, "Записи блогу");
 });
 
-test("schemaLocalization and createPlugin return valid EmDash descriptor and resolved plugin", async () => {
+test("schemaLocalization and createPlugin return valid EmDash descriptor and resolved plugin matching package.json version", async () => {
+	const fs = await import("node:fs");
+	const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf-8"));
 	const { schemaLocalization, createPlugin } = await import("../src/index.mjs");
 	const descriptor = schemaLocalization();
 	assert.equal(descriptor.id, "schema-i18n");
+	assert.equal(descriptor.version, pkg.version);
 	assert.equal(descriptor.format, "native");
 	assert.equal(descriptor.entrypoint, "emdash-schema-i18n");
 	assert.equal(descriptor.adminEntry, "emdash-schema-i18n/admin");
+	assert.equal("options" in descriptor, false);
 
-	const resolved = createPlugin({ dictionary: { uk: { Test: "Тест" } } });
+	const resolved = createPlugin();
 	assert.equal(resolved.id, "schema-i18n");
+	assert.equal(resolved.version, pkg.version);
 	assert.equal(resolved.admin.adminEntry, "emdash-schema-i18n/admin");
 });
 
@@ -325,5 +330,110 @@ test("middleware skips JSON parsing if schema endpoint returns non-JSON content-
 	assert.equal(response.status, 200);
 	assert.equal(await response.text(), "<html><body>Login Required</body></html>");
 });
+
+test("HEAD requests to schema endpoints strip ETag/Content-Length and merge Vary header like GET", async () => {
+	const middleware = createLocalizationMiddleware({
+		dictionary: { uk: { Articles: "Статті" } },
+	});
+
+	const request = new Request("http://localhost:4321/_emdash/api/manifest", {
+		method: "HEAD",
+		headers: { Cookie: "emdash-locale=uk" },
+	});
+
+	const response = await middleware({ request, url: new URL(request.url) }, async () => {
+		return new Response(null, {
+			status: 200,
+			headers: {
+				"Content-Type": "application/json",
+				ETag: '"etag-head-123"',
+				"Content-Length": "456",
+				Vary: "Origin",
+			},
+		});
+	});
+
+	assert.equal(response.status, 200);
+	assert.equal(response.headers.get("ETag"), null);
+	assert.equal(response.headers.get("Content-Length"), null);
+	const vary = response.headers.get("Vary") || "";
+	assert.match(vary, /Origin/i);
+	assert.match(vary, /Cookie/i);
+	assert.match(vary, /Accept-Language/i);
+	assert.equal(await response.text(), "");
+});
+
+test("non-2xx responses (404, 500, 304) pass through middleware untouched", async () => {
+	const middleware = createLocalizationMiddleware({
+		dictionary: { uk: { "Not Found": "Не знайдено" } },
+	});
+
+	for (const status of [304, 404, 500]) {
+		const request = new Request("http://localhost:4321/_emdash/api/manifest", {
+			method: "GET",
+			headers: { Cookie: "emdash-locale=uk" },
+		});
+
+		const body = status === 304 ? null : JSON.stringify({ message: "Not Found" });
+		const response = await middleware({ request, url: new URL(request.url) }, async () => {
+			return new Response(body, {
+				status,
+				headers: {
+					"Content-Type": "application/json",
+					ETag: '"keep-etag"',
+				},
+			});
+		});
+
+		assert.equal(response.status, status);
+		assert.equal(response.headers.get("ETag"), '"keep-etag"');
+		if (status !== 304) {
+			const parsed = await response.json();
+			assert.equal(parsed.message, "Not Found");
+		}
+	}
+});
+
+test("middleware respects custom separator and splitBilingual: false", async () => {
+	const customSepMiddleware = createLocalizationMiddleware({
+		separator: " :: ",
+	});
+
+	const req1 = new Request("http://localhost:4321/_emdash/api/manifest", {
+		method: "GET",
+		headers: { Cookie: "emdash-locale=uk" },
+	});
+
+	const res1 = await customSepMiddleware({ request: req1 }, async () => {
+		return new Response(
+			JSON.stringify({
+				collections: {
+					news: { label: "Новини :: News" },
+				},
+			}),
+			{ status: 200, headers: { "Content-Type": "application/json" } },
+		);
+	});
+	const data1 = await res1.json();
+	assert.equal(data1.collections.news.label, "Новини");
+
+	const noSplitMiddleware = createLocalizationMiddleware({
+		splitBilingual: false,
+	});
+
+	const res2 = await noSplitMiddleware({ request: req1 }, async () => {
+		return new Response(
+			JSON.stringify({
+				collections: {
+					news: { label: "Новини / News" },
+				},
+			}),
+			{ status: 200, headers: { "Content-Type": "application/json" } },
+		);
+	});
+	const data2 = await res2.json();
+	assert.equal(data2.collections.news.label, "Новини / News");
+});
+
 
 

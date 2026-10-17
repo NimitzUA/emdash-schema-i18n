@@ -4,15 +4,25 @@ export interface LocalizeOptions {
 	separator?: string;
 	splitBilingual?: boolean;
 	separatorLocales?: string[];
+	defaultLocale?: string;
+}
+
+export interface ResolveLocaleOptions {
+	useAcceptLanguage?: boolean;
+	allowQueryParam?: boolean;
 }
 
 export declare function installLocaleReloadWatcher(): void;
 
-export declare function normalizeLocale(code: string): string;
+export declare function normalizeLocale(
+	code: string,
+	defaultLocale?: string,
+): string;
 
 export declare function resolveAdminLocale(
 	request: Request,
 	defaultLocale?: string,
+	options?: ResolveLocaleOptions,
 ): string;
 
 export declare function localizeString(

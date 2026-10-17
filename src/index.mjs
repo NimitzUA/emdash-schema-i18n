@@ -1,5 +1,4 @@
 import { definePlugin } from "emdash";
-import pkg from "../package.json" with { type: "json" };
 import {
 	createLocalizationMiddleware,
 	withSchemaLocalization,
@@ -18,7 +17,7 @@ import {
 
 const pluginId = "schema-i18n";
 const pluginName = "Schema & Blocks i18n";
-const version = pkg.version;
+const version = "1.2.3";
 const description = "Dynamic schema, collections, and block types localization for EmDash CMS Admin UI";
 const author = "Serhii Parshyn";
 const packageEntrypoint = "emdash-schema-i18n";
@@ -27,10 +26,9 @@ const adminEntrypoint = "emdash-schema-i18n/admin";
 /**
  * Native plugin descriptor factory for EmDash.
  *
- * @param {object} [options]
  * @returns {import("emdash").PluginDescriptor}
  */
-export function schemaLocalization(options = {}) {
+export function schemaLocalization() {
 	return {
 		id: pluginId,
 		name: pluginName,
@@ -41,7 +39,6 @@ export function schemaLocalization(options = {}) {
 		capabilities: [],
 		entrypoint: packageEntrypoint,
 		adminEntry: adminEntrypoint,
-		options,
 	};
 }
 
@@ -49,7 +46,7 @@ export function schemaLocalization(options = {}) {
 export const customLocalization = schemaLocalization;
 export const schemaI18n = schemaLocalization;
 
-export function createPlugin(_options = {}) {
+export function createPlugin() {
 	return definePlugin({
 		id: pluginId,
 		version,

@@ -1,7 +1,7 @@
 import type { definePlugin, PluginDescriptor } from "emdash";
-import type { LocalizeOptions } from "./localizer.mjs";
+import type { LocalizeOptions, ResolveLocaleOptions } from "./localizer.mjs";
 
-export type { LocalizeOptions } from "./localizer.mjs";
+export type { LocalizeOptions, ResolveLocaleOptions } from "./localizer.mjs";
 export {
 	installLocaleReloadWatcher,
 	normalizeLocale,
@@ -13,8 +13,9 @@ export {
 	localizeCollectionsResponse,
 } from "./localizer.mjs";
 
-export interface SchemaI18nOptions extends Omit<LocalizeOptions, "key"> {
-	defaultLocale?: string;
+export interface SchemaI18nOptions
+	extends Omit<LocalizeOptions, "key">,
+		ResolveLocaleOptions {
 	excludeSchemaEditor?: boolean;
 	localizeSchemaCollections?: boolean;
 	injectHtmlWatcher?: boolean;
@@ -25,16 +26,12 @@ export type CustomLocalizationOptions = SchemaI18nOptions;
 
 export declare const RELOAD_WATCHER_SCRIPT: string;
 
-export declare function schemaLocalization(
-	options?: SchemaI18nOptions,
-): PluginDescriptor;
+export declare function schemaLocalization(): PluginDescriptor;
 
 export declare const customLocalization: typeof schemaLocalization;
 export declare const schemaI18n: typeof schemaLocalization;
 
-export declare function createPlugin(
-	options?: SchemaI18nOptions,
-): ReturnType<typeof definePlugin>;
+export declare function createPlugin(): ReturnType<typeof definePlugin>;
 
 export declare function createLocalizationMiddleware(
 	options?: SchemaI18nOptions,

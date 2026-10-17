@@ -1,6 +1,6 @@
 {
   "name": "emdash-schema-i18n",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "Dynamic schema, collections, and block types localization for EmDash CMS Admin UI",
   "author": {
     "name": "Serhii Parshyn",
@@ -49,8 +49,10 @@
   "files": [
     "src",
     "bin",
+    "test",
     "emdash-plugin.jsonc",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
@@ -66,12 +68,12 @@
     "node": ">=22.16"
   },
   "peerDependencies": {
-    "@emdash-cms/admin": ">=1.2.0",
-    "@lingui/react": ">=4.0.0",
-    "astro": ">=6.0.0",
-    "emdash": ">=1.0.1",
-    "react": ">=18.0.0",
-    "react-dom": ">=18.0.0"
+    "@emdash-cms/admin": ">=1.2.0 <2.0.0",
+    "@lingui/react": ">=4.0.0 <6.0.0",
+    "astro": ">=6.0.0 <8.0.0",
+    "emdash": ">=1.0.1 <2.0.0",
+    "react": ">=18.0.0 <20.0.0",
+    "react-dom": ">=18.0.0 <20.0.0"
   },
   "devDependencies": {
     "@astrojs/node": "^11.1.8",

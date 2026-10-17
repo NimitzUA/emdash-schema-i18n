@@ -76,73 +76,90 @@ export function installLocaleReloadWatcher() {
  * Resolves the admin UI locale from an incoming HTTP Request.
  *
  * Precedence:
- * 1. Query parameter `locale`
+ * 1. Query parameter `locale` (unless `options.allowQueryParam === false`)
  * 2. Cookie `emdash-locale` (standard EmDash admin locale cookie)
- * 3. Header `Accept-Language`
- * 4. Fallback default (`en`)
+ * 3. Header `Accept-Language` (unless `options.useAcceptLanguage === false`)
+ * 4. Fallback `defaultLocale` (default `"en"`)
  *
  * @param {Request} request
  * @param {string} [defaultLocale="en"]
+ * @param {object} [options]
+ * @param {boolean} [options.useAcceptLanguage=true]
+ * @param {boolean} [options.allowQueryParam=true]
  * @returns {string}
  */
-export function resolveAdminLocale(request, defaultLocale = "en") {
-	if (!request) return defaultLocale;
+export function resolveAdminLocale(request, defaultLocale = "en", options = {}) {
+	const fallback = normalizeLocale(defaultLocale, "en");
+	if (!request) return fallback;
 
-	try {
-		const url = new URL(request.url);
-		const queryLocale = url.searchParams.get("locale")?.trim();
-		if (queryLocale) return normalizeLocale(queryLocale);
-	} catch {
-		// Ignore invalid URLs
+	const { useAcceptLanguage = true, allowQueryParam = true } = options;
+
+	if (allowQueryParam) {
+		try {
+			const url = new URL(request.url);
+			const queryLocale = url.searchParams.get("locale")?.trim();
+			if (queryLocale) return normalizeLocale(queryLocale, fallback);
+		} catch {
+			// Ignore invalid URLs
+		}
 	}
 
 	const cookieHeader = request.headers.get("cookie") || "";
 	const cookieMatch = cookieHeader.match(/(?:^|;\s*)emdash-locale=([^;]+)/);
 	if (cookieMatch?.[1]) {
 		try {
-			return normalizeLocale(decodeURIComponent(cookieMatch[1].trim()));
+			return normalizeLocale(decodeURIComponent(cookieMatch[1].trim()), fallback);
 		} catch {
-			return normalizeLocale(cookieMatch[1].trim());
+			return normalizeLocale(cookieMatch[1].trim(), fallback);
 		}
 	}
 
-	const acceptLanguage = request.headers.get("accept-language");
-	if (acceptLanguage) {
-		const candidates = acceptLanguage
-			.split(",")
-			.map((entry, idx) => {
-				const [rawLang, ...params] = entry.trim().split(";");
-				const lang = rawLang?.trim();
-				let q = 1;
-				for (const param of params) {
-					const [k, v] = param.trim().split("=");
-					if (k === "q" && v !== undefined) {
-						const parsed = Number.parseFloat(v);
-						if (!Number.isNaN(parsed)) q = parsed;
+	if (useAcceptLanguage) {
+		const acceptLanguage = request.headers.get("accept-language");
+		if (acceptLanguage) {
+			const candidates = acceptLanguage
+				.split(",")
+				.map((entry, idx) => {
+					const [rawLang, ...params] = entry.trim().split(";");
+					const lang = rawLang?.trim();
+					let q = 1;
+					for (const param of params) {
+						const [k, v] = param.trim().split("=");
+						if (k === "q" && v !== undefined) {
+							const parsed = Number.parseFloat(v);
+							if (!Number.isNaN(parsed)) q = parsed;
+						}
 					}
-				}
-				return { lang, q, idx };
-			})
-			.filter((item) => item.lang && item.lang !== "*" && item.q > 0)
-			.sort((a, b) => b.q - a.q || a.idx - b.idx);
+					return { lang, q, idx };
+				})
+				.filter((item) => item.lang && item.lang !== "*" && item.q > 0)
+				.sort((a, b) => b.q - a.q || a.idx - b.idx);
 
-		if (candidates.length > 0) {
-			return normalizeLocale(candidates[0].lang);
+			if (candidates.length > 0) {
+				return normalizeLocale(candidates[0].lang, fallback);
+			}
 		}
 	}
 
-	return defaultLocale;
+	return fallback;
 }
 
 /**
  * Normalizes locale code to base language (e.g. "uk-UA" -> "uk", "uk_UA" -> "uk", "en-US" -> "en").
  *
  * @param {string} code
+ * @param {string} [defaultLocale="en"]
  * @returns {string}
  */
-export function normalizeLocale(code) {
-	if (!code) return "en";
-	return code.toLowerCase().split(/[-_]/)[0] || code.toLowerCase();
+export function normalizeLocale(code, defaultLocale = "en") {
+	const fallback =
+		defaultLocale && typeof defaultLocale === "string"
+			? defaultLocale.trim().toLowerCase().split(/[-_]/)[0] || "en"
+			: "en";
+	if (!code || typeof code !== "string") return fallback;
+	const trimmed = code.trim().toLowerCase();
+	if (!trimmed) return fallback;
+	return trimmed.split(/[-_]/)[0] || fallback;
 }
 
 /**
@@ -162,17 +179,19 @@ export function normalizeLocale(code) {
  * @param {string} [options.separator=" / "]
  * @param {boolean} [options.splitBilingual=true]
  * @param {string[]} [options.separatorLocales=["uk", "en"]]
+ * @param {string} [options.defaultLocale="en"]
  * @returns {unknown}
  */
 export function localizeString(value, locale, options = {}) {
-	const currentLocale = normalizeLocale(locale);
 	const {
 		key,
 		dictionary,
 		separator = DEFAULT_SEPARATOR,
 		splitBilingual = true,
 		separatorLocales = ["uk", "en"],
+		defaultLocale = "en",
 	} = options;
+	const currentLocale = normalizeLocale(locale, defaultLocale);
 
 	const localeDict =
 		dictionary &&

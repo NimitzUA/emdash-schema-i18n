@@ -63,6 +63,8 @@ export function createLocalizationMiddleware(options = {}) {
 		excludeSchemaEditor = true,
 		localizeSchemaCollections = false,
 		injectHtmlWatcher = options.autoReloadOnLocaleChange ?? false,
+		useAcceptLanguage = true,
+		allowQueryParam = true,
 	} = options;
 
 	return async function localizationMiddleware(context, next) {
@@ -79,11 +81,6 @@ export function createLocalizationMiddleware(options = {}) {
 		}
 
 		const response = await next();
-
-		// HEAD requests have no response body to transform
-		if (method === "HEAD") {
-			return response;
-		}
 
 		if (response?.status >= 200 && response?.status < 300) {
 			const isManifest = pathname === "/_emdash/api/manifest";
@@ -104,9 +101,29 @@ export function createLocalizationMiddleware(options = {}) {
 				if (contentType && !contentType.includes("json")) {
 					return response;
 				}
+
+				if (method === "HEAD") {
+					await response.body?.cancel().catch(() => {});
+					const headers = new Headers(response.headers);
+					headers.set("Content-Type", "application/json; charset=utf-8");
+					headers.delete("etag");
+					headers.delete("content-length");
+					mergeVaryHeader(headers);
+
+					return new Response(null, {
+						status: response.status,
+						statusText: response.statusText,
+						headers,
+					});
+				}
+
 				try {
-					const locale = resolveAdminLocale(context.request, defaultLocale);
+					const locale = resolveAdminLocale(context.request, defaultLocale, {
+						useAcceptLanguage,
+						allowQueryParam,
+					});
 					const data = await response.clone().json();
+					await response.body?.cancel().catch(() => {});
 					let localized = data;
 
 					if (isManifest) {
@@ -139,10 +156,23 @@ export function createLocalizationMiddleware(options = {}) {
 				pathname.startsWith("/_emdash/admin") &&
 				response.headers.get("content-type")?.includes("text/html")
 			) {
+				if (method === "HEAD") {
+					await response.body?.cancel().catch(() => {});
+					const headers = new Headers(response.headers);
+					headers.delete("content-length");
+					headers.delete("etag");
+					return new Response(null, {
+						status: response.status,
+						statusText: response.statusText,
+						headers,
+					});
+				}
+
 				try {
 					const resClone = response.clone();
 					const html = await resClone.text();
 					if (!html.includes('id="emdash-i18n-watcher"')) {
+						await response.body?.cancel().catch(() => {});
 						const injectedHtml = /<\/body>/i.test(html)
 							? html.replace(/<\/body>/i, (match) => `${RELOAD_WATCHER_SCRIPT}${match}`)
 							: `${html}${RELOAD_WATCHER_SCRIPT}`;

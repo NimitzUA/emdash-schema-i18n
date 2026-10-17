@@ -33,11 +33,12 @@ In EmDash CMS, metadata for collections, fields, and block types (`label`, `labe
 
 | Component | Supported Version | Notes |
 | :--- | :--- | :--- |
-| **EmDash CMS (`emdash`)** | `>= 1.0.1` | Tested up to `1.3.0+` |
-| **EmDash Admin (`@emdash-cms/admin`)** | `>= 1.2.0` | Required for admin UI |
-| **Astro** | `>= 6.0.0` | Supports Astro 6 and Astro 7 |
+| **EmDash CMS (`emdash`)** | `>= 1.0.1 < 2.0.0` | Tested up to `1.3.0+` |
+| **EmDash Admin (`@emdash-cms/admin`)** | `>= 1.2.0 < 2.0.0` | Required for admin UI |
+| **Astro** | `>= 6.0.0 < 8.0.0` | Supports Astro 6 and Astro 7 |
 | **Node.js** | `>= 22.16` | Required by EmDash runtime |
-| **React / React DOM** | `>= 18.0.0` | Fully supports React 18 & 19 |
+| **React / React DOM** | `>= 18.0.0 < 20.0.0` | Fully supports React 18 & 19 |
+| **Lingui (`@lingui/react`)** | `>= 4.0.0 < 6.0.0` | Used for active admin UI locale detection |
 
 ---
 
@@ -85,10 +86,12 @@ export default defineConfig({
 });
 ```
 
+> **Note:** `schemaLocalization()` registers the plugin descriptor and client `adminEntry`. All translation options (`dictionary`, `defaultLocale`, `separator`, etc.) are configured in your server middleware (`src/middleware.mjs` / `src/middleware.ts`).
+
 ### 2. In Middleware (`src/middleware.mjs`)
 
 #### Option A: Standalone Middleware
-If you don't have other outer middleware:
+If you don't have other middleware:
 
 ```javascript
 import { createLocalizationMiddleware } from "emdash-schema-i18n/middleware";
@@ -139,6 +142,19 @@ export default adminDictionary;
 
 ---
 
+## Locale Detection Precedence
+
+On incoming requests to `/_emdash/api/*`, `resolveAdminLocale` determines the active admin language in the following order:
+
+1. **Query Parameter (`?locale=<code>`)**: Highest priority for debugging and E2E testing (can be disabled via `allowQueryParam: false`).
+2. **Cookie (`emdash-locale`)**: Standard cookie set by EmDash Admin UI (Lingui) when an administrator selects an interface language.
+3. **`Accept-Language` Header**: Parses quality weights (`;q=`) and selects the highest-priority language (can be disabled via `useAcceptLanguage: false`).
+4. **Fallback (`defaultLocale`)**: Defaults to `"en"`.
+
+> **Important (Cookie vs `Accept-Language`):** If an administrator opens the Admin UI for the very first time before an `emdash-locale` cookie is saved, EmDash's client-side Lingui UI may default to `"en"` while the browser sends `Accept-Language: uk-UA,uk;q=0.9`. If you want schema localization to strictly follow the `emdash-locale` cookie (and `defaultLocale` when no cookie is present), pass `useAcceptLanguage: false` to `createLocalizationMiddleware({ dictionary, useAcceptLanguage: false })`.
+
+---
+
 ## Translation Resolution Order
 
 For any given label or schema property, `emdash-schema-i18n` resolves translations in the following order:
@@ -158,12 +174,13 @@ By default, `excludeSchemaEditor: true` is enabled:
 - **Content Editor & Navigation**: Fully localized via `/_emdash/api/manifest` and `/_emdash/api/schema/block-types`.
 - **Content Types / Schema Editor**: Calls to `/_emdash/api/schema/collections/*` are **not** localized by default. This ensures that opening a collection in Content Types and clicking **Save** will never overwrite your canonical database schema with a localized string.
 - If you explicitly want to localize collections schema endpoints as well, set `localizeSchemaCollections: true`.
+- **External API Scripts Warning**: `GET /_emdash/api/schema/block-types` and `GET /_emdash/api/schema/block-types/<slug>` are localized for `GET` requests so the Admin UI block picker displays translated block labels and field names. While EmDash Admin UI (`1.3.0`) does not round-trip `GET` block-type labels into `PUT`, any external automation script that fetches `GET /_emdash/api/schema/block-types/<slug>` and writes the returned `label` back via `PUT` will write the localized label for the request's resolved locale (or the English half of a legacy `"uk / en"` label when called without cookies).
 
 ---
 
 ## Scaffolding & CLI
 
-To extract all schema and block type strings into a translation dictionary automatically:
+To extract schema and block type strings from your seed file into a translation dictionary automatically:
 
 ```bash
 # Run directly via npx (defaults to --locale=uk)
@@ -172,12 +189,13 @@ npx emdash-schema-i18n extract
 # Or specify a custom target locale, seed path, or output file
 npx emdash-schema-i18n extract --locale=pl --seed=seed/seed.json --out=src/i18n/admin.ts
 
-# Or add to your package.json scripts:
-# "i18n:extract": "emdash-schema-i18n extract"
-npm run i18n:extract
+# Strip legacy bilingual slashes ("Українська / English" -> "English") in seed.json
+npx emdash-schema-i18n extract --clean-seed
 ```
 
-The CLI inspects `seed/seed.json` (collections, fields, options, block types, taxonomies, and menus), preserves all existing translations and locale blocks, and appends newly discovered untranslated strings.
+### CLI Limitations
+- **Seed-based static analysis**: `emdash-schema-i18n extract` reads your JSON seed file (`seed/seed.json`, `.emdash/seed.json`, or `--seed=<path>`). It does **not** connect to a live SQLite/LibSQL database to read runtime-created block types or collections that have not been exported to `seed.json`.
+- **Target locale**: By default, `extract` scaffolds the `uk` dictionary key (`--locale=uk`) and assumes legacy bilingual slash strings in `seed.json` are ordered as `"<targetLocale> / <English>"`. Use `--locale=<code>` to scaffold additional locales while preserving existing locale blocks in `src/i18n/admin.ts`.
 
 ---
 

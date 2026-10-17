@@ -6,6 +6,7 @@ import {
 	localizeBlockTypesResponse,
 	localizeCollectionsResponse,
 	resolveAdminLocale,
+	normalizeLocale,
 } from "../src/localizer.mjs";
 
 test("resolveAdminLocale extracts locale correctly", () => {
@@ -339,5 +340,69 @@ test("resolveAdminLocale respects Accept-Language quality weights and POSIX unde
 	});
 	assert.equal(resolveAdminLocale(reqWithWeights), "uk");
 });
+
+test("normalizeLocale respects defaultLocale when given empty or whitespace code", () => {
+	assert.equal(normalizeLocale(""), "en");
+	assert.equal(normalizeLocale("", "uk"), "uk");
+	assert.equal(normalizeLocale("   ", "pl-PL"), "pl");
+	assert.equal(normalizeLocale("de_DE", "uk"), "de");
+});
+
+test("resolveAdminLocale respects useAcceptLanguage: false and allowQueryParam: false", () => {
+	const reqHeaderOnly = new Request("http://localhost:4321/_emdash/api/manifest", {
+		headers: { "accept-language": "uk-UA,uk;q=0.9" },
+	});
+	assert.equal(
+		resolveAdminLocale(reqHeaderOnly, "en", { useAcceptLanguage: false }),
+		"en",
+	);
+
+	const reqWithQueryAndCookie = new Request(
+		"http://localhost:4321/_emdash/api/manifest?locale=pl",
+		{
+			headers: { cookie: "emdash-locale=uk" },
+		},
+	);
+	assert.equal(
+		resolveAdminLocale(reqWithQueryAndCookie, "en", { allowQueryParam: false }),
+		"uk",
+	);
+});
+
+test("localizeManifest supports custom separator and splitBilingual: false", () => {
+	const manifest = {
+		collections: {
+			posts: {
+				label: "Записи | Posts",
+				fields: {
+					title: {
+						label: "Заголовок / Title",
+					},
+				},
+			},
+		},
+	};
+
+	// 1. Custom separator " | "
+	const customSepUk = localizeManifest(manifest, "uk", { separator: " | " });
+	assert.equal(customSepUk.collections.posts.label, "Записи");
+	assert.equal(customSepUk.collections.posts.fields.title.label, "Заголовок / Title");
+
+	const customSepEn = localizeManifest(manifest, "en", { separator: " | " });
+	assert.equal(customSepEn.collections.posts.label, "Posts");
+
+	// 2. splitBilingual: false preserves slashes in manifest
+	const noSplitUk = localizeManifest(
+		{
+			collections: {
+				posts: { label: "Записи / Posts" },
+			},
+		},
+		"uk",
+		{ splitBilingual: false },
+	);
+	assert.equal(noSplitUk.collections.posts.label, "Записи / Posts");
+});
+
 
 
