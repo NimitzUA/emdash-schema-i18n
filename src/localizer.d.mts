@@ -8,8 +8,10 @@ export interface LocalizeOptions {
 }
 
 export interface ResolveLocaleOptions {
+	useCookie?: boolean;
 	useAcceptLanguage?: boolean;
 	allowQueryParam?: boolean;
+	preferCookieOverQuery?: boolean;
 }
 
 export declare function installLocaleReloadWatcher(): void;

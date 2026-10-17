@@ -435,5 +435,95 @@ test("middleware respects custom separator and splitBilingual: false", async () 
 	assert.equal(data2.collections.news.label, "Новини / News");
 });
 
+test("middleware returns original uncancelled response when localization throws an error", async () => {
+	const throwingDict = {
+		get uk() {
+			throw new Error("Simulated dictionary failure");
+		},
+	};
+
+	const middleware = createLocalizationMiddleware({
+		dictionary: throwingDict,
+	});
+
+	const request = new Request("http://localhost:4321/_emdash/api/manifest", {
+		method: "GET",
+		headers: { Cookie: "emdash-locale=uk" },
+	});
+
+	const originalPayload = {
+		collections: {
+			articles: { label: "Original Articles" },
+		},
+	};
+
+	const prevConsoleError = console.error;
+	console.error = () => {};
+	try {
+		const response = await middleware({ request, url: new URL(request.url) }, async () => {
+			return new Response(JSON.stringify(originalPayload), {
+				status: 200,
+				headers: {
+					"Content-Type": "application/json",
+					ETag: '"original-etag"',
+				},
+			});
+		});
+
+		assert.equal(response.status, 200);
+		assert.equal(response.headers.get("ETag"), '"original-etag"');
+		// Body must still be readable and intact!
+		const data = await response.json();
+		assert.deepEqual(data, originalPayload);
+	} finally {
+		console.error = prevConsoleError;
+	}
+});
+
+test("Vary header only includes Cookie and Accept-Language when they participate in locale resolution", async () => {
+	// 1. useAcceptLanguage: false -> Vary has Cookie only (not Accept-Language)
+	const mwCookieOnly = createLocalizationMiddleware({
+		useAcceptLanguage: false,
+		dictionary: { uk: { Posts: "Записи" } },
+	});
+	const reqNoQuery = new Request("http://localhost:4321/_emdash/api/manifest", {
+		headers: { Cookie: "emdash-locale=uk" },
+	});
+	const resCookieOnly = await mwCookieOnly({ request: reqNoQuery }, async () => {
+		return new Response(JSON.stringify({ collections: { p: { label: "Posts" } } }), {
+			status: 200,
+			headers: { "Content-Type": "application/json" },
+		});
+	});
+	assert.equal(resCookieOnly.headers.get("Vary"), "Cookie");
+
+	// 2. useCookie: false -> Vary has Accept-Language only (not Cookie)
+	const mwAcceptOnly = createLocalizationMiddleware({
+		useCookie: false,
+		dictionary: { uk: { Posts: "Записи" } },
+	});
+	const resAcceptOnly = await mwAcceptOnly({ request: reqNoQuery }, async () => {
+		return new Response(JSON.stringify({ collections: { p: { label: "Posts" } } }), {
+			status: 200,
+			headers: { "Content-Type": "application/json" },
+		});
+	});
+	assert.equal(resAcceptOnly.headers.get("Vary"), "Accept-Language");
+
+	// 3. URL with ?locale=uk (default priority) -> neither Cookie nor Accept-Language added to Vary
+	const mwDefault = createLocalizationMiddleware({
+		dictionary: { uk: { Posts: "Записи" } },
+	});
+	const reqWithQuery = new Request("http://localhost:4321/_emdash/api/manifest?locale=uk");
+	const resWithQuery = await mwDefault({ request: reqWithQuery, url: new URL(reqWithQuery.url) }, async () => {
+		return new Response(JSON.stringify({ collections: { p: { label: "Posts" } } }), {
+			status: 200,
+			headers: { "Content-Type": "application/json" },
+		});
+	});
+	assert.equal(resWithQuery.headers.get("Vary"), null);
+});
+
+
 
 

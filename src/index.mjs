@@ -17,7 +17,7 @@ import {
 
 const pluginId = "schema-i18n";
 const pluginName = "Schema & Blocks i18n";
-const version = "1.2.3";
+const version = "1.2.4";
 const description = "Dynamic schema, collections, and block types localization for EmDash CMS Admin UI";
 const author = "Serhii Parshyn";
 const packageEntrypoint = "emdash-schema-i18n";

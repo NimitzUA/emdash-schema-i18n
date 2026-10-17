@@ -72,38 +72,18 @@ export function installLocaleReloadWatcher() {
 	});
 }
 
-/**
- * Resolves the admin UI locale from an incoming HTTP Request.
- *
- * Precedence:
- * 1. Query parameter `locale` (unless `options.allowQueryParam === false`)
- * 2. Cookie `emdash-locale` (standard EmDash admin locale cookie)
- * 3. Header `Accept-Language` (unless `options.useAcceptLanguage === false`)
- * 4. Fallback `defaultLocale` (default `"en"`)
- *
- * @param {Request} request
- * @param {string} [defaultLocale="en"]
- * @param {object} [options]
- * @param {boolean} [options.useAcceptLanguage=true]
- * @param {boolean} [options.allowQueryParam=true]
- * @returns {string}
- */
-export function resolveAdminLocale(request, defaultLocale = "en", options = {}) {
-	const fallback = normalizeLocale(defaultLocale, "en");
-	if (!request) return fallback;
-
-	const { useAcceptLanguage = true, allowQueryParam = true } = options;
-
-	if (allowQueryParam) {
-		try {
-			const url = new URL(request.url);
-			const queryLocale = url.searchParams.get("locale")?.trim();
-			if (queryLocale) return normalizeLocale(queryLocale, fallback);
-		} catch {
-			// Ignore invalid URLs
-		}
+function extractQueryLocale(request, fallback) {
+	try {
+		const url = new URL(request.url);
+		const queryLocale = url.searchParams.get("locale")?.trim();
+		if (queryLocale) return normalizeLocale(queryLocale, fallback);
+	} catch {
+		// Ignore invalid URLs
 	}
+	return null;
+}
 
+function extractCookieLocale(request, fallback) {
 	const cookieHeader = request.headers.get("cookie") || "";
 	const cookieMatch = cookieHeader.match(/(?:^|;\s*)emdash-locale=([^;]+)/);
 	if (cookieMatch?.[1]) {
@@ -111,6 +91,57 @@ export function resolveAdminLocale(request, defaultLocale = "en", options = {}) 
 			return normalizeLocale(decodeURIComponent(cookieMatch[1].trim()), fallback);
 		} catch {
 			return normalizeLocale(cookieMatch[1].trim(), fallback);
+		}
+	}
+	return null;
+}
+
+/**
+ * Resolves the admin UI locale from an incoming HTTP Request.
+ *
+ * Precedence (default):
+ * 1. Query parameter `locale` (unless `options.allowQueryParam === false`)
+ * 2. Cookie `emdash-locale` (unless `options.useCookie === false`; checked before query if `options.preferCookieOverQuery === true`)
+ * 3. Header `Accept-Language` (unless `options.useAcceptLanguage === false`)
+ * 4. Fallback `defaultLocale` (default `"en"`)
+ *
+ * @param {Request} request
+ * @param {string} [defaultLocale="en"]
+ * @param {object} [options]
+ * @param {boolean} [options.useCookie=true]
+ * @param {boolean} [options.useAcceptLanguage=true]
+ * @param {boolean} [options.allowQueryParam=true]
+ * @param {boolean} [options.preferCookieOverQuery=false]
+ * @returns {string}
+ */
+export function resolveAdminLocale(request, defaultLocale = "en", options = {}) {
+	const fallback = normalizeLocale(defaultLocale, "en");
+	if (!request) return fallback;
+
+	const {
+		useCookie = true,
+		useAcceptLanguage = true,
+		allowQueryParam = true,
+		preferCookieOverQuery = false,
+	} = options;
+
+	if (preferCookieOverQuery) {
+		if (useCookie) {
+			const cookieLoc = extractCookieLocale(request, fallback);
+			if (cookieLoc) return cookieLoc;
+		}
+		if (allowQueryParam) {
+			const queryLoc = extractQueryLocale(request, fallback);
+			if (queryLoc) return queryLoc;
+		}
+	} else {
+		if (allowQueryParam) {
+			const queryLoc = extractQueryLocale(request, fallback);
+			if (queryLoc) return queryLoc;
+		}
+		if (useCookie) {
+			const cookieLoc = extractCookieLocale(request, fallback);
+			if (cookieLoc) return cookieLoc;
 		}
 	}
 

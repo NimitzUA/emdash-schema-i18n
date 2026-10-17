@@ -348,7 +348,7 @@ test("normalizeLocale respects defaultLocale when given empty or whitespace code
 	assert.equal(normalizeLocale("de_DE", "uk"), "de");
 });
 
-test("resolveAdminLocale respects useAcceptLanguage: false and allowQueryParam: false", () => {
+test("resolveAdminLocale respects useAcceptLanguage: false, allowQueryParam: false, useCookie: false, and preferCookieOverQuery: true", () => {
 	const reqHeaderOnly = new Request("http://localhost:4321/_emdash/api/manifest", {
 		headers: { "accept-language": "uk-UA,uk;q=0.9" },
 	});
@@ -360,12 +360,26 @@ test("resolveAdminLocale respects useAcceptLanguage: false and allowQueryParam: 
 	const reqWithQueryAndCookie = new Request(
 		"http://localhost:4321/_emdash/api/manifest?locale=pl",
 		{
-			headers: { cookie: "emdash-locale=uk" },
+			headers: {
+				cookie: "emdash-locale=uk",
+				"accept-language": "de-DE,de;q=0.9",
+			},
 		},
 	);
 	assert.equal(
 		resolveAdminLocale(reqWithQueryAndCookie, "en", { allowQueryParam: false }),
 		"uk",
+	);
+	assert.equal(
+		resolveAdminLocale(reqWithQueryAndCookie, "en", { preferCookieOverQuery: true }),
+		"uk",
+	);
+	assert.equal(
+		resolveAdminLocale(reqWithQueryAndCookie, "en", {
+			allowQueryParam: false,
+			useCookie: false,
+		}),
+		"de",
 	);
 });
 

@@ -8,10 +8,18 @@ import {
 
 export const RELOAD_WATCHER_SCRIPT = `<script id="emdash-i18n-watcher">\n(${installLocaleReloadWatcher.toString()})();\n</script>`;
 
-function mergeVaryHeader(headers) {
+function mergeVaryHeader(
+	headers,
+	{ varyCookie = true, varyAcceptLanguage = true } = {},
+) {
+	const desired = [];
+	if (varyCookie) desired.push("Cookie");
+	if (varyAcceptLanguage) desired.push("Accept-Language");
+	if (desired.length === 0) return;
+
 	const existingVary = headers.get("Vary");
 	if (!existingVary) {
-		headers.set("Vary", "Cookie, Accept-Language");
+		headers.set("Vary", desired.join(", "));
 		return;
 	}
 	const tokens = new Set(
@@ -20,12 +28,27 @@ function mergeVaryHeader(headers) {
 			.map((s) => s.trim().toLowerCase())
 			.filter(Boolean),
 	);
-	const toAdd = [];
-	if (!tokens.has("cookie")) toAdd.push("Cookie");
-	if (!tokens.has("accept-language")) toAdd.push("Accept-Language");
+	const toAdd = desired.filter((h) => !tokens.has(h.toLowerCase()));
 	if (toAdd.length > 0) {
 		headers.set("Vary", `${existingVary}, ${toAdd.join(", ")}`);
 	}
+}
+
+function hasQueryLocaleParam(context) {
+	const search = context?.url?.search;
+	if (typeof search === "string") {
+		return Boolean(new URLSearchParams(search).get("locale")?.trim());
+	}
+	if (context?.request?.url) {
+		try {
+			return Boolean(
+				new URL(context.request.url).searchParams.get("locale")?.trim(),
+			);
+		} catch {
+			return false;
+		}
+	}
+	return false;
 }
 
 function resolvePathname(context) {
@@ -55,6 +78,10 @@ function resolvePathname(context) {
  * @param {boolean} [options.localizeSchemaCollections=false] Explicitly allow localizing /schema/collections.
  * @param {boolean} [options.injectHtmlWatcher=false] Inject inline watcher script into admin HTML (unnecessary when adminEntry is loaded).
  * @param {boolean} [options.autoReloadOnLocaleChange] Deprecated alias for injectHtmlWatcher.
+ * @param {boolean} [options.useCookie=true] Read `emdash-locale` cookie when resolving locale.
+ * @param {boolean} [options.useAcceptLanguage=true] Fall back to `Accept-Language` header when cookie is absent.
+ * @param {boolean} [options.allowQueryParam=true] Allow `?locale=` query parameter override.
+ * @param {boolean} [options.preferCookieOverQuery=false] Give `emdash-locale` cookie higher priority than `?locale=`.
  * @returns {(context: any, next: () => Promise<Response>) => Promise<Response>}
  */
 export function createLocalizationMiddleware(options = {}) {
@@ -63,8 +90,10 @@ export function createLocalizationMiddleware(options = {}) {
 		excludeSchemaEditor = true,
 		localizeSchemaCollections = false,
 		injectHtmlWatcher = options.autoReloadOnLocaleChange ?? false,
+		useCookie = true,
 		useAcceptLanguage = true,
 		allowQueryParam = true,
+		preferCookieOverQuery = false,
 	} = options;
 
 	return async function localizationMiddleware(context, next) {
@@ -102,28 +131,41 @@ export function createLocalizationMiddleware(options = {}) {
 					return response;
 				}
 
+				// If ?locale= is present in the URL and takes priority over cookie,
+				// the URL itself determines the locale without consulting Cookie or Accept-Language.
+				const resolvedFromQuery =
+					allowQueryParam &&
+					!preferCookieOverQuery &&
+					hasQueryLocaleParam(context);
+				const varyOptions = {
+					varyCookie: Boolean(useCookie) && !resolvedFromQuery,
+					varyAcceptLanguage: Boolean(useAcceptLanguage) && !resolvedFromQuery,
+				};
+
 				if (method === "HEAD") {
-					await response.body?.cancel().catch(() => {});
 					const headers = new Headers(response.headers);
 					headers.set("Content-Type", "application/json; charset=utf-8");
 					headers.delete("etag");
 					headers.delete("content-length");
-					mergeVaryHeader(headers);
+					mergeVaryHeader(headers, varyOptions);
 
-					return new Response(null, {
+					const headResponse = new Response(null, {
 						status: response.status,
 						statusText: response.statusText,
 						headers,
 					});
+					await response.body?.cancel().catch(() => {});
+					return headResponse;
 				}
 
 				try {
 					const locale = resolveAdminLocale(context.request, defaultLocale, {
+						useCookie,
 						useAcceptLanguage,
 						allowQueryParam,
+						preferCookieOverQuery,
 					});
 					const data = await response.clone().json();
-					await response.body?.cancel().catch(() => {});
 					let localized = data;
 
 					if (isManifest) {
@@ -134,17 +176,20 @@ export function createLocalizationMiddleware(options = {}) {
 						localized = localizeCollectionsResponse(data, locale, options);
 					}
 
+					const bodyText = JSON.stringify(localized);
 					const headers = new Headers(response.headers);
 					headers.set("Content-Type", "application/json; charset=utf-8");
 					headers.delete("etag");
 					headers.delete("content-length");
-					mergeVaryHeader(headers);
+					mergeVaryHeader(headers, varyOptions);
 
-					return new Response(JSON.stringify(localized), {
+					const localizedResponse = new Response(bodyText, {
 						status: response.status,
 						statusText: response.statusText,
 						headers,
 					});
+					await response.body?.cancel().catch(() => {});
+					return localizedResponse;
 				} catch (err) {
 					console.error("[emdash-schema-i18n] Failed to localize schema response:", err);
 					return response;
@@ -157,33 +202,35 @@ export function createLocalizationMiddleware(options = {}) {
 				response.headers.get("content-type")?.includes("text/html")
 			) {
 				if (method === "HEAD") {
-					await response.body?.cancel().catch(() => {});
 					const headers = new Headers(response.headers);
 					headers.delete("content-length");
 					headers.delete("etag");
-					return new Response(null, {
+					const headResponse = new Response(null, {
 						status: response.status,
 						statusText: response.statusText,
 						headers,
 					});
+					await response.body?.cancel().catch(() => {});
+					return headResponse;
 				}
 
 				try {
 					const resClone = response.clone();
 					const html = await resClone.text();
 					if (!html.includes('id="emdash-i18n-watcher"')) {
-						await response.body?.cancel().catch(() => {});
 						const injectedHtml = /<\/body>/i.test(html)
 							? html.replace(/<\/body>/i, (match) => `${RELOAD_WATCHER_SCRIPT}${match}`)
 							: `${html}${RELOAD_WATCHER_SCRIPT}`;
 						const headers = new Headers(response.headers);
 						headers.delete("content-length");
 						headers.delete("etag");
-						return new Response(injectedHtml, {
+						const htmlResponse = new Response(injectedHtml, {
 							status: response.status,
 							statusText: response.statusText,
 							headers,
 						});
+						await response.body?.cancel().catch(() => {});
+						return htmlResponse;
 					}
 				} catch (err) {
 					console.error("[emdash-schema-i18n] Failed to inject auto-reload watcher:", err);

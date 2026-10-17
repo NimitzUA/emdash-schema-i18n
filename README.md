@@ -146,8 +146,8 @@ export default adminDictionary;
 
 On incoming requests to `/_emdash/api/*`, `resolveAdminLocale` determines the active admin language in the following order:
 
-1. **Query Parameter (`?locale=<code>`)**: Highest priority for debugging and E2E testing (can be disabled via `allowQueryParam: false`).
-2. **Cookie (`emdash-locale`)**: Standard cookie set by EmDash Admin UI (Lingui) when an administrator selects an interface language.
+1. **Query Parameter (`?locale=<code>`)**: Highest priority by default for debugging and E2E testing (can be disabled via `allowQueryParam: false`, or placed after cookie via `preferCookieOverQuery: true`).
+2. **Cookie (`emdash-locale`)**: Standard cookie set by EmDash Admin UI (Lingui) when an administrator selects an interface language (can be disabled via `useCookie: false`, or given top priority via `preferCookieOverQuery: true`).
 3. **`Accept-Language` Header**: Parses quality weights (`;q=`) and selects the highest-priority language (can be disabled via `useAcceptLanguage: false`).
 4. **Fallback (`defaultLocale`)**: Defaults to `"en"`.
 

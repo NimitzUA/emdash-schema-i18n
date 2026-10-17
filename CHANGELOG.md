@@ -2,6 +2,17 @@
 
 All notable changes to `emdash-schema-i18n` are documented in this file.
 
+## [1.2.4] - 2026-10-18
+
+### Fixed
+- **Safe Error Fallback on Stream Cancellation**: Moved `response.body?.cancel()` to run **after** localization and `new Response(...)` construction so that if localization throws an error, `catch` returns the original uncancelled `response` with its body intact.
+- **Precise `Vary` Header**: `Vary` now only includes `Accept-Language` when `useAcceptLanguage` is enabled, only includes `Cookie` when `useCookie` is enabled, and omits both when the locale is determined directly by `?locale=` in the URL.
+
+### Added
+- **Cookie Priority & Toggle**: Added `preferCookieOverQuery` (default `false`) and `useCookie` (default `true`) options to `createLocalizationMiddleware` and `resolveAdminLocale`.
+
+---
+
 ## [1.2.3] - 2026-10-18
 
 ### Fixed
