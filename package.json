@@ -23,6 +23,9 @@
     "schema",
     "admin-ui"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "emdash-schema-i18n": "./bin/cli.mjs"
   },
