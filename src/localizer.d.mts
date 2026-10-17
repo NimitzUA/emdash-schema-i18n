@@ -56,3 +56,16 @@ export declare function localizeCollectionsResponse<T = any>(
 	locale: string,
 	options?: LocalizeOptions,
 ): T;
+
+export declare function localizeTaxonomiesResponse<T = any>(
+	data: T,
+	locale: string,
+	options?: LocalizeOptions,
+): T;
+
+export declare function localizeTaxonomyResponse<T = any>(
+	data: T,
+	locale: string,
+	options?: LocalizeOptions,
+): T;
+

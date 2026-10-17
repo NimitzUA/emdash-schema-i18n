@@ -2,6 +2,18 @@
 
 All notable changes to `emdash-schema-i18n` are documented in this file.
 
+## [1.3.0] - 2026-10-18
+
+### Added
+- **Taxonomy Definitions API Localization (`localizeTaxonomies: true`)**: Automatically localizes `label`, `labelSingular`, and `description` on `GET`/`HEAD` requests to `/_emdash/api/taxonomies` and `/_emdash/api/taxonomies/[name]` (supporting exact key overrides like `taxonomies.<name>.label`, `taxonomies.<name>.labelSingular`, `taxonomies.<name>.description`).
+- **Taxonomy Terms Isolation**: Leaves `/_emdash/api/taxonomies/[name]/terms...`, `.../translations`, `.../reorder`, and `.../bulk-tag` untouched so per-locale term content managed by EmDash is never altered.
+- **Dual Taxonomy Schema Protection**:
+  1. **Referer Guard**: Skips localizing `GET /_emdash/api/taxonomies...` when requested from the Taxonomy Management screen (`Referer: /_emdash/admin/taxonomies...`) while `excludeSchemaEditor: true`.
+  2. **PUT/PATCH Reverse-Mapping Safeguard**: On `PUT`/`PATCH /_emdash/api/taxonomies/[name]`, if `label`, `labelSingular`, or `description` matches the active locale's translation, automatically restores the canonical original value before saving.
+- **New Public Exports**: Exported `localizeTaxonomiesResponse` and `localizeTaxonomyResponse`.
+
+---
+
 ## [1.2.4] - 2026-10-18
 
 ### Fixed

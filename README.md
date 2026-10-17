@@ -170,10 +170,14 @@ For any given label or schema property, `emdash-schema-i18n` resolves translatio
 
 ## Data Safety & Schema Editor Protection
 
-By default, `excludeSchemaEditor: true` is enabled:
-- **Content Editor & Navigation**: Fully localized via `/_emdash/api/manifest` and `/_emdash/api/schema/block-types`.
+By default, `excludeSchemaEditor: true` and `localizeTaxonomies: true` are enabled:
+- **Content Editor & Navigation**: Fully localized via `/_emdash/api/manifest`, `/_emdash/api/schema/block-types`, and `/_emdash/api/taxonomies` (`GET /_emdash/api/taxonomies` and `GET /_emdash/api/taxonomies/[name]`).
+- **Taxonomy Terms Untouched**: Term endpoints (`/_emdash/api/taxonomies/[name]/terms...`, `.../translations`, `.../reorder`) are never modified because terms are content with native per-locale rows in EmDash.
+- **Taxonomy Editor Dual Protection**:
+  1. **Referer Check**: Requests to `GET /_emdash/api/taxonomies...` originating from the Taxonomy Management screen (`Referer: /_emdash/admin/taxonomies...`) are not localized so the form displays canonical labels.
+  2. **Reverse-Mapping on `PUT`/`PATCH`**: If `PUT /_emdash/api/taxonomies/[name]` receives a `label`, `labelSingular`, or `description` matching the active locale's translation, the middleware automatically restores the original canonical string before saving to the database.
 - **Content Types / Schema Editor**: Calls to `/_emdash/api/schema/collections/*` are **not** localized by default. This ensures that opening a collection in Content Types and clicking **Save** will never overwrite your canonical database schema with a localized string.
-- If you explicitly want to localize collections schema endpoints as well, set `localizeSchemaCollections: true`.
+- If you explicitly want to localize collections schema endpoints as well, set `localizeSchemaCollections: true`. To disable taxonomy endpoint localization, set `localizeTaxonomies: false`.
 - **External API Scripts Warning**: `GET /_emdash/api/schema/block-types` and `GET /_emdash/api/schema/block-types/<slug>` are localized for `GET` requests so the Admin UI block picker displays translated block labels and field names. While EmDash Admin UI (`1.3.0`) does not round-trip `GET` block-type labels into `PUT`, any external automation script that fetches `GET /_emdash/api/schema/block-types/<slug>` and writes the returned `label` back via `PUT` will write the localized label for the request's resolved locale (or the English half of a legacy `"uk / en"` label when called without cookies).
 
 ---

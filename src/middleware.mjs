@@ -3,6 +3,9 @@ import {
 	localizeManifest,
 	localizeBlockTypesResponse,
 	localizeCollectionsResponse,
+	localizeTaxonomiesResponse,
+	extractRawTaxonomies,
+	restoreOriginalTaxonomyInput,
 	installLocaleReloadWatcher,
 } from "./localizer.mjs";
 
@@ -64,9 +67,49 @@ function resolvePathname(context) {
 }
 
 /**
- * Creates an Astro middleware handler that intercepts `/_emdash/api/manifest`
- * and `/_emdash/api/schema/block-types` and dynamically localizes the schema JSON
- * according to the admin session language.
+ * Matches `/_emdash/api/taxonomies` and `/_emdash/api/taxonomies/[name]`,
+ * while excluding `/terms...`, `/translations`, `/reorder`, and `/bulk-tag`.
+ *
+ * @param {string} pathname
+ * @returns {boolean}
+ */
+function isTaxonomyDefinitionPath(pathname) {
+	if (pathname === "/_emdash/api/taxonomies") return true;
+	if (!pathname.startsWith("/_emdash/api/taxonomies/")) return false;
+	const rest = pathname.slice("/_emdash/api/taxonomies/".length);
+	return Boolean(rest) && !rest.includes("/") && rest !== "bulk-tag";
+}
+
+function getSingleTaxonomyName(pathname) {
+	if (!pathname.startsWith("/_emdash/api/taxonomies/")) return null;
+	const rest = pathname.slice("/_emdash/api/taxonomies/".length);
+	if (!rest || rest.includes("/") || rest === "bulk-tag") return null;
+	try {
+		return decodeURIComponent(rest);
+	} catch {
+		return rest;
+	}
+}
+
+function isTaxonomyEditorReferer(request) {
+	const referer =
+		request?.headers?.get("referer") || request?.headers?.get("referrer");
+	if (!referer) return false;
+	try {
+		const url = new URL(referer, "http://localhost");
+		return (
+			url.pathname === "/_emdash/admin/taxonomies" ||
+			url.pathname.startsWith("/_emdash/admin/taxonomies/")
+		);
+	} catch {
+		return referer.includes("/_emdash/admin/taxonomies");
+	}
+}
+
+/**
+ * Creates an Astro middleware handler that intercepts `/_emdash/api/manifest`,
+ * `/_emdash/api/schema/block-types`, and `/_emdash/api/taxonomies` and dynamically
+ * localizes the schema JSON according to the admin session language.
  *
  * @param {object} [options]
  * @param {Record<string, Record<string, string>>} [options.dictionary]
@@ -74,8 +117,9 @@ function resolvePathname(context) {
  * @param {boolean} [options.splitBilingual=true]
  * @param {string[]} [options.separatorLocales=["uk", "en"]]
  * @param {string} [options.defaultLocale="en"]
- * @param {boolean} [options.excludeSchemaEditor=true] Protects Schema Editor (Content Types) from receiving translated labels.
+ * @param {boolean} [options.excludeSchemaEditor=true] Protects Schema Editor (Content Types & Taxonomies manager) from receiving translated labels.
  * @param {boolean} [options.localizeSchemaCollections=false] Explicitly allow localizing /schema/collections.
+ * @param {boolean} [options.localizeTaxonomies=true] Localize taxonomy definitions on /_emdash/api/taxonomies and /_emdash/api/taxonomies/[name].
  * @param {boolean} [options.injectHtmlWatcher=false] Inject inline watcher script into admin HTML (unnecessary when adminEntry is loaded).
  * @param {boolean} [options.autoReloadOnLocaleChange] Deprecated alias for injectHtmlWatcher.
  * @param {boolean} [options.useCookie=true] Read `emdash-locale` cookie when resolving locale.
@@ -89,6 +133,7 @@ export function createLocalizationMiddleware(options = {}) {
 		defaultLocale = "en",
 		excludeSchemaEditor = true,
 		localizeSchemaCollections = false,
+		localizeTaxonomies = true,
 		injectHtmlWatcher = options.autoReloadOnLocaleChange ?? false,
 		useCookie = true,
 		useAcceptLanguage = true,
@@ -96,16 +141,62 @@ export function createLocalizationMiddleware(options = {}) {
 		preferCookieOverQuery = false,
 	} = options;
 
+	/** @type {Map<string, { label?: string, labelSingular?: string, description?: string }>} */
+	const cachedTaxonomyOriginals = new Map();
+
 	return async function localizationMiddleware(context, next) {
-		// 1. Fast-path: process only GET and HEAD requests to prevent mutating writes (POST/PUT/PATCH/DELETE)
 		const method = context.request?.method || "GET";
-		if (method !== "GET" && method !== "HEAD") {
+		const pathname = resolvePathname(context);
+
+		// Fast-path: skip all non-EmDash routes immediately
+		if (!pathname.startsWith("/_emdash/")) {
 			return next();
 		}
 
-		// 2. Fast-path: skip all non-EmDash routes immediately without awaiting response inspection
-		const pathname = resolvePathname(context);
-		if (!pathname.startsWith("/_emdash/")) {
+		// Safeguard (b): On PUT/PATCH to /_emdash/api/taxonomies/[name], restore canonical
+		// original label/labelSingular/description if the incoming value matches the active locale's translation.
+		if (
+			localizeTaxonomies &&
+			(method === "PUT" || method === "PATCH")
+		) {
+			const taxName = getSingleTaxonomyName(pathname);
+			const reqContentType = context.request?.headers?.get("content-type") || "";
+			if (taxName && reqContentType.includes("json")) {
+				try {
+					const rawBody = await context.request.clone().json();
+					const locale = resolveAdminLocale(context.request, defaultLocale, {
+						useCookie,
+						useAcceptLanguage,
+						allowQueryParam,
+						preferCookieOverQuery,
+					});
+					const { body: restoredBody, changed } = restoreOriginalTaxonomyInput(
+						rawBody,
+						taxName,
+						locale,
+						options,
+						cachedTaxonomyOriginals,
+					);
+					if (changed) {
+						const newHeaders = new Headers(context.request.headers);
+						newHeaders.delete("content-length");
+						const updatedRequest = new Request(context.request.url, {
+							method: context.request.method,
+							headers: newHeaders,
+							body: JSON.stringify(restoredBody),
+						});
+						await context.request.body?.cancel().catch(() => {});
+						context.request = updatedRequest;
+					}
+				} catch {
+					// If body parsing fails, proceed with untouched request
+				}
+			}
+			return next();
+		}
+
+		// Process only GET and HEAD requests for response localization
+		if (method !== "GET" && method !== "HEAD") {
 			return next();
 		}
 
@@ -125,9 +216,40 @@ export function createLocalizationMiddleware(options = {}) {
 				(pathname === "/_emdash/api/schema/collections" ||
 					pathname.startsWith("/_emdash/api/schema/collections/"));
 
-			if (isManifest || isBlockTypes || isCollections) {
+			const isTaxonomyDefRoute =
+				localizeTaxonomies && isTaxonomyDefinitionPath(pathname);
+
+			if (isManifest || isBlockTypes || isCollections || isTaxonomyDefRoute) {
 				const contentType = response.headers.get("content-type") || "";
 				if (contentType && !contentType.includes("json")) {
+					return response;
+				}
+
+				// Safeguard (a): Skip localizing taxonomy definitions when requested from the
+				// Taxonomy management screen (`/_emdash/admin/taxonomies...`), while still
+				// recording canonical originals in `cachedTaxonomyOriginals` for PUT safeguard (b).
+				if (
+					isTaxonomyDefRoute &&
+					excludeSchemaEditor &&
+					isTaxonomyEditorReferer(context.request)
+				) {
+					if (method === "GET") {
+						try {
+							const rawData = await response.clone().json();
+							for (const tax of extractRawTaxonomies(rawData)) {
+								const key = tax?.name || tax?.slug;
+								if (key) {
+									cachedTaxonomyOriginals.set(key, {
+										label: tax.label,
+										labelSingular: tax.labelSingular,
+										description: tax.description,
+									});
+								}
+							}
+						} catch {
+							// Ignore parse errors
+						}
+					}
 					return response;
 				}
 
@@ -174,6 +296,18 @@ export function createLocalizationMiddleware(options = {}) {
 						localized = localizeBlockTypesResponse(data, locale, options);
 					} else if (isCollections) {
 						localized = localizeCollectionsResponse(data, locale, options);
+					} else if (isTaxonomyDefRoute) {
+						for (const tax of extractRawTaxonomies(data)) {
+							const key = tax?.name || tax?.slug;
+							if (key) {
+								cachedTaxonomyOriginals.set(key, {
+									label: tax.label,
+									labelSingular: tax.labelSingular,
+									description: tax.description,
+								});
+							}
+						}
+						localized = localizeTaxonomiesResponse(data, locale, options);
 					}
 
 					const bodyText = JSON.stringify(localized);

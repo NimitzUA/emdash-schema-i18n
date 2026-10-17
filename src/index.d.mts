@@ -11,6 +11,8 @@ export {
 	localizeBlockTypesResponse,
 	localizeBlockTypeResponse,
 	localizeCollectionsResponse,
+	localizeTaxonomiesResponse,
+	localizeTaxonomyResponse,
 } from "./localizer.mjs";
 
 export interface SchemaI18nOptions
@@ -18,6 +20,7 @@ export interface SchemaI18nOptions
 		ResolveLocaleOptions {
 	excludeSchemaEditor?: boolean;
 	localizeSchemaCollections?: boolean;
+	localizeTaxonomies?: boolean;
 	injectHtmlWatcher?: boolean;
 	autoReloadOnLocaleChange?: boolean;
 }

@@ -272,6 +272,8 @@ test("CLI extract supports --locale flag and preserves other existing locales in
 			{
 				name: "tags",
 				label: "Tags",
+				labelSingular: "Tag",
+				description: "Content tags",
 			},
 		],
 	};
@@ -301,6 +303,8 @@ test("CLI extract supports --locale flag and preserves other existing locales in
 	assert.ok(updatedTs.includes('"Articles": "Artykuły"'));
 	assert.ok(updatedTs.includes('"Content": ""'));
 	assert.ok(updatedTs.includes('"Tags": ""'));
+	assert.ok(updatedTs.includes('"Tag": ""'));
+	assert.ok(updatedTs.includes('"Content tags": ""'));
 	// Ukrainian locale block must still be preserved
 	assert.ok(updatedTs.includes("uk: {"));
 	assert.ok(updatedTs.includes('"Articles": "Статті"'));

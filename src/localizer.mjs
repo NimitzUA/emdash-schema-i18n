@@ -7,7 +7,7 @@ const DEFAULT_SEPARATOR = " / ";
 const COLLECTION_TEXT_PROPS = ["label", "labelSingular", "description", "group"];
 const BLOCK_TYPE_TEXT_PROPS = ["label", "description", "category"];
 const FIELD_TEXT_PROPS = ["label", "labelSingular", "description", "placeholder", "hint"];
-const TAXONOMY_TEXT_PROPS = ["label", "labelSingular"];
+const TAXONOMY_TEXT_PROPS = ["label", "labelSingular", "description"];
 
 /**
  * Cache of known source phrases per dictionary object reference.
@@ -427,13 +427,9 @@ export function localizeManifest(manifest, locale, options = {}) {
 
 	// 4. Localize Taxonomies
 	if (Array.isArray(localized.taxonomies)) {
-		localized.taxonomies = localized.taxonomies.map((tax) => {
-			if (!tax || typeof tax !== "object") return tax;
-			const t = { ...tax };
-			const taxSlug = t.name || t.slug || t.id || "unknown";
-			localizeObjectProps(t, TAXONOMY_TEXT_PROPS, `taxonomies.${taxSlug}`, locale, options);
-			return t;
-		});
+		localized.taxonomies = localized.taxonomies.map((tax) =>
+			localizeSingleTaxonomy(tax, locale, options),
+		);
 	}
 
 	// 5. Localize Plugin UI contributions (adminPages, dashboardWidgets, fieldWidgets, portableTextBlocks)
@@ -556,6 +552,13 @@ function localizeSchemaEnvelope(data, localizeItem, isDirectItem) {
 		};
 	}
 
+	if (Array.isArray(data.taxonomies)) {
+		return {
+			...data,
+			taxonomies: data.taxonomies.map(localizeItem),
+		};
+	}
+
 	if (Array.isArray(data)) {
 		return data.map(localizeItem);
 	}
@@ -564,6 +567,17 @@ function localizeSchemaEnvelope(data, localizeItem, isDirectItem) {
 		return {
 			...data,
 			item: localizeItem(data.item),
+		};
+	}
+
+	if (
+		data.taxonomy &&
+		typeof data.taxonomy === "object" &&
+		!Array.isArray(data.taxonomy)
+	) {
+		return {
+			...data,
+			taxonomy: localizeItem(data.taxonomy),
 		};
 	}
 
@@ -704,4 +718,134 @@ function localizeSingleCollection(col, locale, options = {}, fallbackSlug = unde
 	}
 
 	return c;
+}
+
+/**
+ * Localizes taxonomy definitions list / response (GET /_emdash/api/taxonomies and /_emdash/api/taxonomies/[name]).
+ *
+ * @param {any} data
+ * @param {string} locale
+ * @param {object} [options]
+ * @returns {any}
+ */
+export function localizeTaxonomiesResponse(data, locale, options = {}) {
+	return localizeSchemaEnvelope(
+		data,
+		(tax) => localizeSingleTaxonomy(tax, locale, options),
+		(d) => Boolean(d.name || d.slug || d.label),
+	);
+}
+
+/**
+ * Localizes a single taxonomy definition response (GET /_emdash/api/taxonomies/[name]).
+ */
+export const localizeTaxonomyResponse = localizeTaxonomiesResponse;
+
+function localizeSingleTaxonomy(tax, locale, options = {}, fallbackSlug = undefined) {
+	if (!tax || typeof tax !== "object") return tax;
+	const t = { ...tax };
+	const taxSlug = t.name || t.slug || t.id || fallbackSlug || "unknown";
+	localizeObjectProps(t, TAXONOMY_TEXT_PROPS, `taxonomies.${taxSlug}`, locale, options);
+	return t;
+}
+
+/**
+ * Extracts raw taxonomy definition objects from an API response envelope so their
+ * canonical labels can be cached before localization.
+ *
+ * @param {any} data
+ * @returns {any[]}
+ */
+export function extractRawTaxonomies(data) {
+	if (!data || typeof data !== "object") return [];
+	if (data.data && typeof data.data === "object" && !Array.isArray(data.data)) {
+		return extractRawTaxonomies(data.data);
+	}
+	if (Array.isArray(data.taxonomies)) return data.taxonomies;
+	if (Array.isArray(data.items)) return data.items;
+	if (Array.isArray(data)) return data;
+	if (data.taxonomy && typeof data.taxonomy === "object") return [data.taxonomy];
+	if (data.item && typeof data.item === "object") return [data.item];
+	if (data.name || data.slug) return [data];
+	return [];
+}
+
+/**
+ * Restores canonical original `label`, `labelSingular`, and `description` on a
+ * taxonomy definition update payload (`PUT /_emdash/api/taxonomies/[name]`) if
+ * the incoming values match the active locale's translation.
+ *
+ * @param {any} input
+ * @param {string} taxonomyName
+ * @param {string} locale
+ * @param {object} [options]
+ * @param {Map<string, Record<string, string | undefined>>} [cachedOriginals]
+ * @returns {{ body: any, changed: boolean }}
+ */
+export function restoreOriginalTaxonomyInput(
+	input,
+	taxonomyName,
+	locale,
+	options = {},
+	cachedOriginals = undefined,
+) {
+	if (!input || typeof input !== "object" || Array.isArray(input)) {
+		return { body: input, changed: false };
+	}
+
+	const defaultLocale = options.defaultLocale || "en";
+	const currentLocale = normalizeLocale(locale, defaultLocale);
+	const dictionary = options.dictionary;
+	const localeDict =
+		dictionary &&
+		typeof dictionary === "object" &&
+		Object.hasOwn(dictionary, currentLocale)
+			? dictionary[currentLocale]
+			: undefined;
+
+	const cached = cachedOriginals?.get(taxonomyName);
+	let changed = false;
+	const restored = { ...input };
+
+	for (const prop of TAXONOMY_TEXT_PROPS) {
+		const incomingVal = restored[prop];
+		if (typeof incomingVal !== "string" || !incomingVal) continue;
+
+		const propKey = `taxonomies.${taxonomyName}.${prop}`;
+
+		// 1. Check against previously observed canonical value from GET
+		const origVal = cached?.[prop];
+		if (typeof origVal === "string" && origVal && origVal !== incomingVal) {
+			const expectedLocalized = localizeString(origVal, currentLocale, {
+				...options,
+				key: propKey,
+			});
+			if (expectedLocalized === incomingVal) {
+				restored[prop] = origVal;
+				changed = true;
+				continue;
+			}
+		}
+
+		// 2. Fallback reverse lookup in dictionary[currentLocale]
+		if (localeDict && typeof localeDict === "object") {
+			for (const [sourceKey, translatedVal] of Object.entries(localeDict)) {
+				if (
+					translatedVal === incomingVal &&
+					sourceKey !== propKey &&
+					!sourceKey.startsWith("taxonomies.") &&
+					!sourceKey.startsWith("collections.") &&
+					!sourceKey.startsWith("blockTypes.") &&
+					!sourceKey.startsWith("menus.") &&
+					!sourceKey.startsWith("plugins.")
+				) {
+					restored[prop] = sourceKey;
+					changed = true;
+					break;
+				}
+			}
+		}
+	}
+
+	return { body: restored, changed };
 }

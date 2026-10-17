@@ -232,6 +232,8 @@ if (Array.isArray(seed.collections)) {
 // 3. Process Taxonomies
 if (Array.isArray(seed.taxonomies)) {
 	deepWalk(seed.taxonomies);
+} else if (seed.taxonomies && typeof seed.taxonomies === "object") {
+	deepWalk(seed.taxonomies);
 }
 
 // 4. Process Menus
