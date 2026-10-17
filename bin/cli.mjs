@@ -148,31 +148,41 @@ if (fs.existsSync(outPath)) {
 }
 
 const existingTranslations = existingMultiLocaleDict[targetLocale] || {};
+const knownExistingPhrases = new Set();
+for (const localeMap of Object.values(existingMultiLocaleDict)) {
+	if (localeMap && typeof localeMap === "object") {
+		for (const phrase of Object.keys(localeMap)) {
+			knownExistingPhrases.add(phrase);
+		}
+	}
+}
 const extracted = new Map();
 
 function processString(str, parentObj, key) {
 	if (typeof str !== "string" || !str.trim()) return str;
+	const trimmed = str.trim();
 
-	if (str.includes(" / ")) {
+	if (str.includes(" / ") && !knownExistingPhrases.has(trimmed)) {
 		const parts = str.split(" / ");
-		const firstPart = parts[0].trim();
-		const en = parts.slice(1).join(" / ").trim();
+		if (parts.length === 2) {
+			const firstPart = parts[0].trim();
+			const en = parts[1].trim();
 
-		if (!extracted.has(en) || !extracted.get(en)) {
-			extracted.set(en, existingTranslations[en] || firstPart);
-		}
+			if (!extracted.has(en) || !extracted.get(en)) {
+				extracted.set(en, existingTranslations[en] || firstPart);
+			}
 
-		if (cleanSeed && parentObj && key !== undefined) {
-			parentObj[key] = en;
+			if (cleanSeed && parentObj && key !== undefined) {
+				parentObj[key] = en;
+			}
+			return en;
 		}
-		return en;
-	} else {
-		const trimmed = str.trim();
-		if (!extracted.has(trimmed)) {
-			extracted.set(trimmed, existingTranslations[trimmed] || "");
-		}
-		return trimmed;
 	}
+
+	if (!extracted.has(trimmed)) {
+		extracted.set(trimmed, existingTranslations[trimmed] || "");
+	}
+	return trimmed;
 }
 
 const TARGET_KEYS = new Set([

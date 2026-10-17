@@ -1,11 +1,20 @@
 import type { definePlugin, PluginDescriptor } from "emdash";
+import type { LocalizeOptions } from "./localizer.mjs";
 
-export interface SchemaI18nOptions {
-	separator?: string;
-	splitBilingual?: boolean;
-	separatorLocales?: string[];
+export type { LocalizeOptions } from "./localizer.mjs";
+export {
+	installLocaleReloadWatcher,
+	normalizeLocale,
+	resolveAdminLocale,
+	localizeString,
+	localizeManifest,
+	localizeBlockTypesResponse,
+	localizeBlockTypeResponse,
+	localizeCollectionsResponse,
+} from "./localizer.mjs";
+
+export interface SchemaI18nOptions extends Omit<LocalizeOptions, "key"> {
 	defaultLocale?: string;
-	dictionary?: Record<string, Record<string, string>>;
 	excludeSchemaEditor?: boolean;
 	localizeSchemaCollections?: boolean;
 	injectHtmlWatcher?: boolean;
@@ -35,70 +44,5 @@ export declare function withSchemaLocalization(
 	existingOnRequest?: (context: any, next: () => Promise<Response>) => Promise<Response>,
 	options?: SchemaI18nOptions,
 ): (context: any, next: () => Promise<Response>) => Promise<Response>;
-
-export declare function resolveAdminLocale(
-	request: Request,
-	defaultLocale?: string,
-): string;
-
-export declare function normalizeLocale(code: string): string;
-
-export declare function installLocaleReloadWatcher(): void;
-
-export declare function localizeString(
-	value: unknown,
-	locale: string,
-	options?: {
-		key?: string;
-		dictionary?: Record<string, Record<string, string>>;
-		separator?: string;
-		splitBilingual?: boolean;
-		separatorLocales?: string[];
-	},
-): unknown;
-
-export declare function localizeManifest<T = any>(
-	manifest: T,
-	locale: string,
-	options?: {
-		dictionary?: Record<string, Record<string, string>>;
-		separator?: string;
-		splitBilingual?: boolean;
-		separatorLocales?: string[];
-	},
-): T;
-
-export declare function localizeBlockTypesResponse<T = any>(
-	data: T,
-	locale: string,
-	options?: {
-		dictionary?: Record<string, Record<string, string>>;
-		separator?: string;
-		splitBilingual?: boolean;
-		separatorLocales?: string[];
-	},
-): T;
-
-export declare function localizeBlockTypeResponse<T = any>(
-	data: T,
-	locale: string,
-	options?: {
-		dictionary?: Record<string, Record<string, string>>;
-		separator?: string;
-		splitBilingual?: boolean;
-		separatorLocales?: string[];
-	},
-): T;
-
-export declare function localizeCollectionsResponse<T = any>(
-	data: T,
-	locale: string,
-	options?: {
-		dictionary?: Record<string, Record<string, string>>;
-		separator?: string;
-		splitBilingual?: boolean;
-		separatorLocales?: string[];
-	},
-): T;
 
 export default schemaLocalization;

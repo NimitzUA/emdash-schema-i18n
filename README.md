@@ -80,9 +80,6 @@ export default defineConfig({
       plugins: [
         schemaLocalization(),
       ],
-      middleware: {
-        outer: "./src/middleware.mjs",
-      },
     }),
   ],
 });

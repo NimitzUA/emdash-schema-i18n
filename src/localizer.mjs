@@ -553,16 +553,16 @@ function localizeSingleBlockType(bt, locale, options = {}) {
 
 	localizeObjectProps(block, BLOCK_TYPE_TEXT_PROPS, keyPrefix, locale, options);
 
-	if (Array.isArray(block.fields)) {
-		block.fields = block.fields.map((fld) => localizeSingleField(fld, keyPrefix, locale, options));
+	if (block.fields) {
+		block.fields = localizeFieldsCollection(block.fields, keyPrefix, locale, options);
 	}
 
 	if (Array.isArray(block.versions)) {
 		block.versions = block.versions.map((ver) => {
-			if (!ver || !Array.isArray(ver.fields)) return ver;
+			if (!ver || !ver.fields) return ver;
 			return {
 				...ver,
-				fields: ver.fields.map((fld) => localizeSingleField(fld, keyPrefix, locale, options)),
+				fields: localizeFieldsCollection(ver.fields, keyPrefix, locale, options),
 			};
 		});
 	}
@@ -597,9 +597,12 @@ function localizeSingleField(fld, parentKey, locale, options = {}, fallbackSlug 
 			validationChanged = true;
 		}
 
-		if (Array.isArray(newValidation.subFields)) {
-			newValidation.subFields = newValidation.subFields.map((sub) =>
-				localizeSingleField(sub, fieldKeyPrefix, locale, options),
+		if (newValidation.subFields) {
+			newValidation.subFields = localizeFieldsCollection(
+				newValidation.subFields,
+				fieldKeyPrefix,
+				locale,
+				options,
 			);
 			validationChanged = true;
 		}
@@ -610,8 +613,8 @@ function localizeSingleField(fld, parentKey, locale, options = {}, fallbackSlug 
 	}
 
 	// Subfields (repeaters, groups)
-	if (Array.isArray(field.fields)) {
-		field.fields = field.fields.map((sub) => localizeSingleField(sub, fieldKeyPrefix, locale, options));
+	if (field.fields) {
+		field.fields = localizeFieldsCollection(field.fields, fieldKeyPrefix, locale, options);
 	}
 
 	// Block types inside blocks fields (e.g. case_study.fields.blocks.blockTypes)

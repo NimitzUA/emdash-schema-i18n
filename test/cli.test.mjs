@@ -328,4 +328,47 @@ test("CLI rejects unknown commands and flags with non-zero exit code", async () 
 	);
 });
 
+test("CLI extract --clean-seed preserves canonical English phrases with slashes and 3+ part strings", async () => {
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "emdash-cli-test-"));
+	const seedPath = path.join(tmpDir, "seed.json");
+	const outTsPath = path.join(tmpDir, "admin.ts");
+
+	const initialTs = `export const adminDictionary = {
+	uk: {
+		"Before / after": "До / після",
+	},
+};
+`;
+	fs.writeFileSync(outTsPath, initialTs, "utf-8");
+
+	const seed = {
+		collections: [
+			{
+				label: "Before / after",
+				description: "Small / Medium / Large",
+			},
+		],
+	};
+	fs.writeFileSync(seedPath, JSON.stringify(seed, null, 2), "utf-8");
+
+	await execFileAsync("node", [
+		cliPath,
+		"extract",
+		`--seed=${seedPath}`,
+		`--out=${outTsPath}`,
+		"--clean-seed",
+	]);
+
+	const cleanedSeed = JSON.parse(fs.readFileSync(seedPath, "utf-8"));
+	assert.equal(cleanedSeed.collections[0].label, "Before / after");
+	assert.equal(cleanedSeed.collections[0].description, "Small / Medium / Large");
+
+	const updatedTs = fs.readFileSync(outTsPath, "utf-8");
+	assert.ok(updatedTs.includes('"Before / after": "До / після"'));
+	assert.ok(updatedTs.includes('"Small / Medium / Large": ""'));
+
+	fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+
 
