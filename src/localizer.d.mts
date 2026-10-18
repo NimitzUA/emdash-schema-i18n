@@ -69,3 +69,46 @@ export declare function localizeTaxonomyResponse<T = any>(
 	options?: LocalizeOptions,
 ): T;
 
+export declare class TaxonomyTranslationCache {
+	maxSize: number;
+	ttlMs: number;
+	constructor(options?: {
+		maxSize?: number;
+		ttlMs?: number;
+		now?: () => number;
+	});
+	makeKey(name: string, locale: string, field: string): string;
+	pruneExpired(currentTime?: number): void;
+	set(
+		name: string,
+		locale: string,
+		field: string,
+		served: string,
+		original: string,
+	): void;
+	getOriginal(
+		name: string,
+		locale: string,
+		field: string,
+		incomingValue: string,
+	): string | undefined;
+	delete(name: string, locale: string, field: string): void;
+	readonly size: number;
+}
+
+export declare function recordTaxonomyTranslations(
+	rawData: any,
+	localizedData: any,
+	fallbackRowLocale: string | undefined,
+	defaultLocale: string,
+	cache: TaxonomyTranslationCache,
+): void;
+
+export declare function restoreOriginalTaxonomyInput<T = any>(
+	input: T,
+	taxonomyName: string,
+	targetLocale: string,
+	options?: LocalizeOptions,
+	cache?: TaxonomyTranslationCache,
+): { body: T; changed: boolean };
+

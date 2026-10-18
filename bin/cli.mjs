@@ -229,11 +229,21 @@ if (Array.isArray(seed.collections)) {
 	deepWalk(seed.collections);
 }
 
-// 3. Process Taxonomies
-if (Array.isArray(seed.taxonomies)) {
-	deepWalk(seed.taxonomies);
-} else if (seed.taxonomies && typeof seed.taxonomies === "object") {
-	deepWalk(seed.taxonomies);
+// 3. Process Taxonomies (label and labelSingular on taxonomy definitions only)
+const taxonomyEntries = Array.isArray(seed.taxonomies)
+	? seed.taxonomies
+	: seed.taxonomies && typeof seed.taxonomies === "object"
+		? Object.values(seed.taxonomies)
+		: [];
+for (const tax of taxonomyEntries) {
+	if (tax && typeof tax === "object") {
+		if (typeof tax.label === "string") {
+			processString(tax.label, tax, "label");
+		}
+		if (typeof tax.labelSingular === "string") {
+			processString(tax.labelSingular, tax, "labelSingular");
+		}
+	}
 }
 
 // 4. Process Menus

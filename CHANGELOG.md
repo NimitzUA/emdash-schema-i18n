@@ -2,14 +2,22 @@
 
 All notable changes to `emdash-schema-i18n` are documented in this file.
 
+## [1.3.1] - 2026-10-18
+
+### Changed
+- **Opt-In Request Body Rewriting (`restoreTaxonomyLabelsOnWrite: false`)**: Separated `PUT`/`PATCH /_emdash/api/taxonomies/[name]` request body rewriting (introduced in `1.3.0`) from `localizeTaxonomies` into its own opt-in option `restoreTaxonomyLabelsOnWrite` (default `false`), since EmDash 1.3.0 Admin UI does not send `PUT` updates for taxonomy definitions and mutating incoming request bodies is only needed for external `GET` -> `PUT` scripts.
+- **Target-Record Locale & Bounded TTL Cache (`TaxonomyTranslationCache`)**: When `restoreTaxonomyLabelsOnWrite: true` is enabled, restoration now resolves the target definition row's locale from `?locale=` (or `defaultLocale` when omitted, rather than the admin cookie) and only restores a field if the incoming value matches the exact translation previously served by `GET` for `name + locale + field` (stored in a bounded cache with configurable `taxonomyCacheMaxSize: 500` and `taxonomyCacheTtlMs: 300_000`). Removed reverse dictionary scanning so deliberate `PUT ?locale=uk` writes with Ukrainian labels are never overwritten.
+- **Removed `Referer`-Based Exclusion**: Dropped `Referer` header sniffing on `GET /_emdash/api/taxonomies...` in favor of explicit endpoint/option configuration (`localizeTaxonomies`).
+- **Taxonomy Fields Alignment**: Removed non-existent `description` from taxonomy definition fields (`label` and `labelSingular` only, matching EmDash's `_emdash_taxonomy_defs` schema).
+
+---
+
 ## [1.3.0] - 2026-10-18
 
 ### Added
-- **Taxonomy Definitions API Localization (`localizeTaxonomies: true`)**: Automatically localizes `label`, `labelSingular`, and `description` on `GET`/`HEAD` requests to `/_emdash/api/taxonomies` and `/_emdash/api/taxonomies/[name]` (supporting exact key overrides like `taxonomies.<name>.label`, `taxonomies.<name>.labelSingular`, `taxonomies.<name>.description`).
+- **Taxonomy Definitions API Localization (`localizeTaxonomies: true`)**: Automatically localizes `label` and `labelSingular` on `GET`/`HEAD` requests to `/_emdash/api/taxonomies` and `/_emdash/api/taxonomies/[name]` (supporting exact key overrides like `taxonomies.<name>.label` and `taxonomies.<name>.labelSingular`).
 - **Taxonomy Terms Isolation**: Leaves `/_emdash/api/taxonomies/[name]/terms...`, `.../translations`, `.../reorder`, and `.../bulk-tag` untouched so per-locale term content managed by EmDash is never altered.
-- **Dual Taxonomy Schema Protection**:
-  1. **Referer Guard**: Skips localizing `GET /_emdash/api/taxonomies...` when requested from the Taxonomy Management screen (`Referer: /_emdash/admin/taxonomies...`) while `excludeSchemaEditor: true`.
-  2. **PUT/PATCH Reverse-Mapping Safeguard**: On `PUT`/`PATCH /_emdash/api/taxonomies/[name]`, if `label`, `labelSingular`, or `description` matches the active locale's translation, automatically restores the canonical original value before saving.
+- **Request Body Rewriting on Taxonomy `PUT`/`PATCH` (New Behavior)**: Introduced request body restoration on `PUT`/`PATCH /_emdash/api/taxonomies/[name]` to prevent translated labels from overwriting canonical taxonomy definitions (refined and made opt-in via `restoreTaxonomyLabelsOnWrite: false` in `1.3.1`).
 - **New Public Exports**: Exported `localizeTaxonomiesResponse` and `localizeTaxonomyResponse`.
 
 ---

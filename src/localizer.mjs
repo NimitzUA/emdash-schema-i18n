@@ -7,7 +7,7 @@ const DEFAULT_SEPARATOR = " / ";
 const COLLECTION_TEXT_PROPS = ["label", "labelSingular", "description", "group"];
 const BLOCK_TYPE_TEXT_PROPS = ["label", "description", "category"];
 const FIELD_TEXT_PROPS = ["label", "labelSingular", "description", "placeholder", "hint"];
-const TAXONOMY_TEXT_PROPS = ["label", "labelSingular", "description"];
+const TAXONOMY_TEXT_PROPS = ["label", "labelSingular"];
 
 /**
  * Cache of known source phrases per dictionary object reference.
@@ -771,39 +771,202 @@ export function extractRawTaxonomies(data) {
 }
 
 /**
- * Restores canonical original `label`, `labelSingular`, and `description` on a
- * taxonomy definition update payload (`PUT /_emdash/api/taxonomies/[name]`) if
- * the incoming values match the active locale's translation.
+ * Bounded TTL cache storing `{ served -> original }` mappings for taxonomy definition
+ * fields that middleware localized during `GET /_emdash/api/taxonomies...` responses.
+ *
+ * Keyed by `name + locale + field` where `locale` is the target taxonomy definition
+ * record's locale (from `taxonomy.locale` / `?locale=` / `defaultLocale`).
+ */
+export class TaxonomyTranslationCache {
+	/**
+	 * @param {object} [options]
+	 * @param {number} [options.maxSize=500] Maximum number of field entries to retain.
+	 * @param {number} [options.ttlMs=300000] Entry time-to-live in milliseconds (default 5 minutes).
+	 * @param {() => number} [options.now] Clock function for deterministic testing.
+	 */
+	constructor({ maxSize = 500, ttlMs = 300_000, now = () => Date.now() } = {}) {
+		this.maxSize = Math.max(1, maxSize);
+		this.ttlMs = Math.max(1, ttlMs);
+		this.now = now;
+		/** @type {Map<string, { served: string, original: string, expiresAt: number }>} */
+		this.entries = new Map();
+	}
+
+	/**
+	 * @param {string} name
+	 * @param {string} locale
+	 * @param {string} field
+	 * @returns {string}
+	 */
+	makeKey(name, locale, field) {
+		return `${name}\0${locale}\0${field}`;
+	}
+
+	/**
+	 * Removes expired entries from the map.
+	 * @param {number} [currentTime]
+	 */
+	pruneExpired(currentTime = this.now()) {
+		for (const [key, entry] of this.entries) {
+			if (currentTime > entry.expiresAt) {
+				this.entries.delete(key);
+			}
+		}
+	}
+
+	/**
+	 * Records that for `(name, locale, field)`, middleware replaced `original` with `served`.
+	 *
+	 * @param {string} name
+	 * @param {string} locale
+	 * @param {string} field
+	 * @param {string} served
+	 * @param {string} original
+	 */
+	set(name, locale, field, served, original) {
+		if (
+			!name ||
+			!locale ||
+			!field ||
+			typeof served !== "string" ||
+			typeof original !== "string" ||
+			served === original
+		) {
+			return;
+		}
+		const currentTime = this.now();
+		const key = this.makeKey(name, locale, field);
+
+		if (this.entries.has(key)) {
+			this.entries.delete(key);
+		} else if (this.entries.size >= this.maxSize) {
+			this.pruneExpired(currentTime);
+			while (this.entries.size >= this.maxSize) {
+				const oldestKey = this.entries.keys().next().value;
+				if (oldestKey === undefined) break;
+				this.entries.delete(oldestKey);
+			}
+		}
+
+		this.entries.set(key, {
+			served,
+			original,
+			expiresAt: currentTime + this.ttlMs,
+		});
+	}
+
+	/**
+	 * Returns `original` if and only if `(name, locale, field)` has a non-expired
+	 * entry whose `served` value equals `incomingValue`.
+	 *
+	 * @param {string} name
+	 * @param {string} locale
+	 * @param {string} field
+	 * @param {string} incomingValue
+	 * @returns {string | undefined}
+	 */
+	getOriginal(name, locale, field, incomingValue) {
+		const key = this.makeKey(name, locale, field);
+		const entry = this.entries.get(key);
+		if (!entry) return undefined;
+
+		if (this.now() > entry.expiresAt) {
+			this.entries.delete(key);
+			return undefined;
+		}
+
+		return entry.served === incomingValue ? entry.original : undefined;
+	}
+
+	/**
+	 * Removes a cached entry for `(name, locale, field)`.
+	 *
+	 * @param {string} name
+	 * @param {string} locale
+	 * @param {string} field
+	 */
+	delete(name, locale, field) {
+		this.entries.delete(this.makeKey(name, locale, field));
+	}
+
+	get size() {
+		return this.entries.size;
+	}
+}
+
+/**
+ * Records `{ served -> original }` translations in `cache` for each taxonomy definition
+ * whose `label` or `labelSingular` was rewritten by `localizeTaxonomiesResponse`.
+ *
+ * @param {any} rawData
+ * @param {any} localizedData
+ * @param {string | undefined} fallbackRowLocale
+ * @param {string} defaultLocale
+ * @param {TaxonomyTranslationCache} cache
+ */
+export function recordTaxonomyTranslations(
+	rawData,
+	localizedData,
+	fallbackRowLocale,
+	defaultLocale,
+	cache,
+) {
+	if (!cache) return;
+	const rawList = extractRawTaxonomies(rawData);
+	const locList = extractRawTaxonomies(localizedData);
+	const normDefault = normalizeLocale(defaultLocale, "en");
+	const normFallback = normalizeLocale(fallbackRowLocale || normDefault, normDefault);
+
+	for (let i = 0; i < rawList.length; i++) {
+		const rawTax = rawList[i];
+		const locTax = locList[i];
+		if (!rawTax || !locTax || typeof rawTax !== "object" || typeof locTax !== "object") {
+			continue;
+		}
+		const taxName = rawTax.name || rawTax.slug;
+		if (!taxName) continue;
+
+		const rowLocale =
+			typeof rawTax.locale === "string" && rawTax.locale.trim()
+				? normalizeLocale(rawTax.locale, normDefault)
+				: normFallback;
+
+		for (const prop of TAXONOMY_TEXT_PROPS) {
+			const origVal = rawTax[prop];
+			const servedVal = locTax[prop];
+			if (typeof origVal === "string" && typeof servedVal === "string" && servedVal !== origVal) {
+				cache.set(taxName, rowLocale, prop, servedVal, origVal);
+			}
+		}
+	}
+}
+
+/**
+ * Restores canonical original `label` and `labelSingular` on a taxonomy definition
+ * update payload (`PUT /_emdash/api/taxonomies/[name]`) if and only if the incoming
+ * value matches the translation previously served by `GET` for `(taxonomyName, targetLocale, field)`.
  *
  * @param {any} input
  * @param {string} taxonomyName
- * @param {string} locale
+ * @param {string} targetLocale Target definition record's locale (from `?locale=` or `defaultLocale`).
  * @param {object} [options]
- * @param {Map<string, Record<string, string | undefined>>} [cachedOriginals]
+ * @param {TaxonomyTranslationCache} [cache]
  * @returns {{ body: any, changed: boolean }}
  */
 export function restoreOriginalTaxonomyInput(
 	input,
 	taxonomyName,
-	locale,
+	targetLocale,
 	options = {},
-	cachedOriginals = undefined,
+	cache = undefined,
 ) {
-	if (!input || typeof input !== "object" || Array.isArray(input)) {
+	if (!input || typeof input !== "object" || Array.isArray(input) || !cache) {
 		return { body: input, changed: false };
 	}
 
 	const defaultLocale = options.defaultLocale || "en";
-	const currentLocale = normalizeLocale(locale, defaultLocale);
-	const dictionary = options.dictionary;
-	const localeDict =
-		dictionary &&
-		typeof dictionary === "object" &&
-		Object.hasOwn(dictionary, currentLocale)
-			? dictionary[currentLocale]
-			: undefined;
+	const rowLocale = normalizeLocale(targetLocale || defaultLocale, defaultLocale);
 
-	const cached = cachedOriginals?.get(taxonomyName);
 	let changed = false;
 	const restored = { ...input };
 
@@ -811,41 +974,16 @@ export function restoreOriginalTaxonomyInput(
 		const incomingVal = restored[prop];
 		if (typeof incomingVal !== "string" || !incomingVal) continue;
 
-		const propKey = `taxonomies.${taxonomyName}.${prop}`;
-
-		// 1. Check against previously observed canonical value from GET
-		const origVal = cached?.[prop];
-		if (typeof origVal === "string" && origVal && origVal !== incomingVal) {
-			const expectedLocalized = localizeString(origVal, currentLocale, {
-				...options,
-				key: propKey,
-			});
-			if (expectedLocalized === incomingVal) {
-				restored[prop] = origVal;
-				changed = true;
-				continue;
-			}
-		}
-
-		// 2. Fallback reverse lookup in dictionary[currentLocale]
-		if (localeDict && typeof localeDict === "object") {
-			for (const [sourceKey, translatedVal] of Object.entries(localeDict)) {
-				if (
-					translatedVal === incomingVal &&
-					sourceKey !== propKey &&
-					!sourceKey.startsWith("taxonomies.") &&
-					!sourceKey.startsWith("collections.") &&
-					!sourceKey.startsWith("blockTypes.") &&
-					!sourceKey.startsWith("menus.") &&
-					!sourceKey.startsWith("plugins.")
-				) {
-					restored[prop] = sourceKey;
-					changed = true;
-					break;
-				}
-			}
+		const origVal = cache.getOriginal(taxonomyName, rowLocale, prop, incomingVal);
+		if (typeof origVal === "string" && origVal !== incomingVal) {
+			restored[prop] = origVal;
+			changed = true;
+		} else {
+			// Deliberate write with a new value: invalidate any stale cached entry for this field
+			cache.delete(taxonomyName, rowLocale, prop);
 		}
 	}
 
 	return { body: restored, changed };
 }
+

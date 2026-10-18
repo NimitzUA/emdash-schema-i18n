@@ -13,6 +13,9 @@ export {
 	localizeCollectionsResponse,
 	localizeTaxonomiesResponse,
 	localizeTaxonomyResponse,
+	TaxonomyTranslationCache,
+	recordTaxonomyTranslations,
+	restoreOriginalTaxonomyInput,
 } from "./localizer.mjs";
 
 export interface SchemaI18nOptions
@@ -21,6 +24,9 @@ export interface SchemaI18nOptions
 	excludeSchemaEditor?: boolean;
 	localizeSchemaCollections?: boolean;
 	localizeTaxonomies?: boolean;
+	restoreTaxonomyLabelsOnWrite?: boolean;
+	taxonomyCacheMaxSize?: number;
+	taxonomyCacheTtlMs?: number;
 	injectHtmlWatcher?: boolean;
 	autoReloadOnLocaleChange?: boolean;
 }

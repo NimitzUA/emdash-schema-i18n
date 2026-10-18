@@ -11,6 +11,9 @@ import {
 	localizeCollectionsResponse,
 	localizeTaxonomiesResponse,
 	localizeTaxonomyResponse,
+	TaxonomyTranslationCache,
+	recordTaxonomyTranslations,
+	restoreOriginalTaxonomyInput,
 	localizeString,
 	resolveAdminLocale,
 	normalizeLocale,
@@ -19,7 +22,7 @@ import {
 
 const pluginId = "schema-i18n";
 const pluginName = "Schema & Blocks i18n";
-const version = "1.3.0";
+const version = "1.3.1";
 const description = "Dynamic schema, collections, and block types localization for EmDash CMS Admin UI";
 const author = "Serhii Parshyn";
 const packageEntrypoint = "emdash-schema-i18n";
@@ -69,6 +72,9 @@ export {
 	localizeCollectionsResponse,
 	localizeTaxonomiesResponse,
 	localizeTaxonomyResponse,
+	TaxonomyTranslationCache,
+	recordTaxonomyTranslations,
+	restoreOriginalTaxonomyInput,
 	localizeString,
 	resolveAdminLocale,
 	normalizeLocale,

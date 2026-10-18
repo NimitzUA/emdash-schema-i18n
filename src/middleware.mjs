@@ -4,7 +4,8 @@ import {
 	localizeBlockTypesResponse,
 	localizeCollectionsResponse,
 	localizeTaxonomiesResponse,
-	extractRawTaxonomies,
+	TaxonomyTranslationCache,
+	recordTaxonomyTranslations,
 	restoreOriginalTaxonomyInput,
 	installLocaleReloadWatcher,
 } from "./localizer.mjs";
@@ -37,21 +38,25 @@ function mergeVaryHeader(
 	}
 }
 
-function hasQueryLocaleParam(context) {
+function getQueryLocaleParam(context) {
 	const search = context?.url?.search;
 	if (typeof search === "string") {
-		return Boolean(new URLSearchParams(search).get("locale")?.trim());
+		const val = new URLSearchParams(search).get("locale")?.trim();
+		return val || null;
 	}
 	if (context?.request?.url) {
 		try {
-			return Boolean(
-				new URL(context.request.url).searchParams.get("locale")?.trim(),
-			);
+			const val = new URL(context.request.url).searchParams.get("locale")?.trim();
+			return val || null;
 		} catch {
-			return false;
+			return null;
 		}
 	}
-	return false;
+	return null;
+}
+
+function hasQueryLocaleParam(context) {
+	return Boolean(getQueryLocaleParam(context));
 }
 
 function resolvePathname(context) {
@@ -91,21 +96,6 @@ function getSingleTaxonomyName(pathname) {
 	}
 }
 
-function isTaxonomyEditorReferer(request) {
-	const referer =
-		request?.headers?.get("referer") || request?.headers?.get("referrer");
-	if (!referer) return false;
-	try {
-		const url = new URL(referer, "http://localhost");
-		return (
-			url.pathname === "/_emdash/admin/taxonomies" ||
-			url.pathname.startsWith("/_emdash/admin/taxonomies/")
-		);
-	} catch {
-		return referer.includes("/_emdash/admin/taxonomies");
-	}
-}
-
 /**
  * Creates an Astro middleware handler that intercepts `/_emdash/api/manifest`,
  * `/_emdash/api/schema/block-types`, and `/_emdash/api/taxonomies` and dynamically
@@ -117,9 +107,12 @@ function isTaxonomyEditorReferer(request) {
  * @param {boolean} [options.splitBilingual=true]
  * @param {string[]} [options.separatorLocales=["uk", "en"]]
  * @param {string} [options.defaultLocale="en"]
- * @param {boolean} [options.excludeSchemaEditor=true] Protects Schema Editor (Content Types & Taxonomies manager) from receiving translated labels.
+ * @param {boolean} [options.excludeSchemaEditor=true] Protects Schema Editor (Content Types manager) from receiving translated labels.
  * @param {boolean} [options.localizeSchemaCollections=false] Explicitly allow localizing /schema/collections.
- * @param {boolean} [options.localizeTaxonomies=true] Localize taxonomy definitions on /_emdash/api/taxonomies and /_emdash/api/taxonomies/[name].
+ * @param {boolean} [options.localizeTaxonomies=true] Localize taxonomy definitions on GET/HEAD /_emdash/api/taxonomies and /_emdash/api/taxonomies/[name].
+ * @param {boolean} [options.restoreTaxonomyLabelsOnWrite=false] Restore original taxonomy labels on PUT/PATCH /_emdash/api/taxonomies/[name] when incoming value matches a translation previously served by GET.
+ * @param {number} [options.taxonomyCacheMaxSize=500] Maximum entries in the taxonomy translation cache.
+ * @param {number} [options.taxonomyCacheTtlMs=300000] TTL in milliseconds for cached taxonomy translations (default 5 minutes).
  * @param {boolean} [options.injectHtmlWatcher=false] Inject inline watcher script into admin HTML (unnecessary when adminEntry is loaded).
  * @param {boolean} [options.autoReloadOnLocaleChange] Deprecated alias for injectHtmlWatcher.
  * @param {boolean} [options.useCookie=true] Read `emdash-locale` cookie when resolving locale.
@@ -134,6 +127,9 @@ export function createLocalizationMiddleware(options = {}) {
 		excludeSchemaEditor = true,
 		localizeSchemaCollections = false,
 		localizeTaxonomies = true,
+		restoreTaxonomyLabelsOnWrite = false,
+		taxonomyCacheMaxSize = 500,
+		taxonomyCacheTtlMs = 300_000,
 		injectHtmlWatcher = options.autoReloadOnLocaleChange ?? false,
 		useCookie = true,
 		useAcceptLanguage = true,
@@ -141,8 +137,11 @@ export function createLocalizationMiddleware(options = {}) {
 		preferCookieOverQuery = false,
 	} = options;
 
-	/** @type {Map<string, { label?: string, labelSingular?: string, description?: string }>} */
-	const cachedTaxonomyOriginals = new Map();
+	const taxonomyTranslationCache = new TaxonomyTranslationCache({
+		maxSize: taxonomyCacheMaxSize,
+		ttlMs: taxonomyCacheTtlMs,
+		now: options.now,
+	});
 
 	return async function localizationMiddleware(context, next) {
 		const method = context.request?.method || "GET";
@@ -153,10 +152,11 @@ export function createLocalizationMiddleware(options = {}) {
 			return next();
 		}
 
-		// Safeguard (b): On PUT/PATCH to /_emdash/api/taxonomies/[name], restore canonical
-		// original label/labelSingular/description if the incoming value matches the active locale's translation.
+		// Opt-in write safeguard: On PUT/PATCH to /_emdash/api/taxonomies/[name], restore
+		// canonical original label/labelSingular if and only if the incoming value matches
+		// the translation previously served by GET for the target record's locale.
 		if (
-			localizeTaxonomies &&
+			restoreTaxonomyLabelsOnWrite &&
 			(method === "PUT" || method === "PATCH")
 		) {
 			const taxName = getSingleTaxonomyName(pathname);
@@ -164,18 +164,19 @@ export function createLocalizationMiddleware(options = {}) {
 			if (taxName && reqContentType.includes("json")) {
 				try {
 					const rawBody = await context.request.clone().json();
-					const locale = resolveAdminLocale(context.request, defaultLocale, {
-						useCookie,
-						useAcceptLanguage,
-						allowQueryParam,
-						preferCookieOverQuery,
-					});
+					const queryLocale = getQueryLocaleParam(context);
+					const bodyLocale =
+						typeof rawBody?.locale === "string" && rawBody.locale.trim()
+							? rawBody.locale.trim()
+							: null;
+					const targetLocale = queryLocale || bodyLocale || defaultLocale;
+
 					const { body: restoredBody, changed } = restoreOriginalTaxonomyInput(
 						rawBody,
 						taxName,
-						locale,
+						targetLocale,
 						options,
-						cachedTaxonomyOriginals,
+						taxonomyTranslationCache,
 					);
 					if (changed) {
 						const newHeaders = new Headers(context.request.headers);
@@ -184,9 +185,19 @@ export function createLocalizationMiddleware(options = {}) {
 							method: context.request.method,
 							headers: newHeaders,
 							body: JSON.stringify(restoredBody),
+							signal: context.request.signal,
 						});
 						await context.request.body?.cancel().catch(() => {});
-						context.request = updatedRequest;
+						try {
+							context.request = updatedRequest;
+						} catch {
+							Object.defineProperty(context, "request", {
+								value: updatedRequest,
+								writable: true,
+								configurable: true,
+								enumerable: true,
+							});
+						}
 					}
 				} catch {
 					// If body parsing fails, proceed with untouched request
@@ -222,34 +233,6 @@ export function createLocalizationMiddleware(options = {}) {
 			if (isManifest || isBlockTypes || isCollections || isTaxonomyDefRoute) {
 				const contentType = response.headers.get("content-type") || "";
 				if (contentType && !contentType.includes("json")) {
-					return response;
-				}
-
-				// Safeguard (a): Skip localizing taxonomy definitions when requested from the
-				// Taxonomy management screen (`/_emdash/admin/taxonomies...`), while still
-				// recording canonical originals in `cachedTaxonomyOriginals` for PUT safeguard (b).
-				if (
-					isTaxonomyDefRoute &&
-					excludeSchemaEditor &&
-					isTaxonomyEditorReferer(context.request)
-				) {
-					if (method === "GET") {
-						try {
-							const rawData = await response.clone().json();
-							for (const tax of extractRawTaxonomies(rawData)) {
-								const key = tax?.name || tax?.slug;
-								if (key) {
-									cachedTaxonomyOriginals.set(key, {
-										label: tax.label,
-										labelSingular: tax.labelSingular,
-										description: tax.description,
-									});
-								}
-							}
-						} catch {
-							// Ignore parse errors
-						}
-					}
 					return response;
 				}
 
@@ -297,17 +280,17 @@ export function createLocalizationMiddleware(options = {}) {
 					} else if (isCollections) {
 						localized = localizeCollectionsResponse(data, locale, options);
 					} else if (isTaxonomyDefRoute) {
-						for (const tax of extractRawTaxonomies(data)) {
-							const key = tax?.name || tax?.slug;
-							if (key) {
-								cachedTaxonomyOriginals.set(key, {
-									label: tax.label,
-									labelSingular: tax.labelSingular,
-									description: tax.description,
-								});
-							}
-						}
 						localized = localizeTaxonomiesResponse(data, locale, options);
+						if (restoreTaxonomyLabelsOnWrite) {
+							const queryLocale = getQueryLocaleParam(context);
+							recordTaxonomyTranslations(
+								data,
+								localized,
+								queryLocale || defaultLocale,
+								defaultLocale,
+								taxonomyTranslationCache,
+							);
+						}
 					}
 
 					const bodyText = JSON.stringify(localized);

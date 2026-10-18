@@ -1,10 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createContext } from "astro/middleware";
+import { Kysely } from "kysely";
+import { runMigrations } from "emdash/db";
+import { createDialect } from "emdash/db/sqlite";
+import * as taxonomiesIndexRoute from "emdash/internal/routes/api/taxonomies/index";
+import * as taxonomiesNameRoute from "emdash/internal/routes/api/taxonomies/_name_";
 import {
 	createLocalizationMiddleware,
 	withSchemaLocalization,
 } from "../src/middleware.mjs";
-import { localizeString } from "../src/localizer.mjs";
+import { localizeString, TaxonomyTranslationCache } from "../src/localizer.mjs";
 
 test("POST to /schema/collections/x/fields is never intercepted or transformed", async () => {
 	const middleware = createLocalizationMiddleware({
@@ -530,7 +536,6 @@ test("GET /_emdash/api/taxonomies and /_emdash/api/taxonomies/[name] are localiz
 			uk: {
 				"Project categories": "Категорії проєктів",
 				"Project category": "Категорія проєкту",
-				"Category for portfolio projects": "Категорія для портфоліо-проєктів",
 				"taxonomies.industries.label": "Галузі (точкове перевизначення)",
 			},
 		},
@@ -545,7 +550,6 @@ test("GET /_emdash/api/taxonomies and /_emdash/api/taxonomies/[name] are localiz
 					name: "project_categories",
 					label: "Project categories",
 					labelSingular: "Project category",
-					description: "Category for portfolio projects",
 					hierarchical: false,
 					collections: ["projects"],
 				},
@@ -563,7 +567,7 @@ test("GET /_emdash/api/taxonomies and /_emdash/api/taxonomies/[name] are localiz
 	const reqListUk = new Request("http://localhost:4321/_emdash/api/taxonomies", {
 		headers: { Cookie: "emdash-locale=uk" },
 	});
-	const resListUk = await middleware({ request: reqListUk, url: new URL(reqListUk.url) }, async () => {
+	const resListUk = await middleware(createContext({ request: reqListUk }), async () => {
 		return new Response(JSON.stringify(listPayload), {
 			status: 200,
 			headers: { "Content-Type": "application/json" },
@@ -572,14 +576,13 @@ test("GET /_emdash/api/taxonomies and /_emdash/api/taxonomies/[name] are localiz
 	const dataListUk = await resListUk.json();
 	assert.equal(dataListUk.data.taxonomies[0].label, "Категорії проєктів");
 	assert.equal(dataListUk.data.taxonomies[0].labelSingular, "Категорія проєкту");
-	assert.equal(dataListUk.data.taxonomies[0].description, "Категорія для портфоліо-проєктів");
 	assert.equal(dataListUk.data.taxonomies[1].label, "Галузі (точкове перевизначення)");
 
 	// 2. GET /_emdash/api/taxonomies in en -> shows original
 	const reqListEn = new Request("http://localhost:4321/_emdash/api/taxonomies", {
 		headers: { Cookie: "emdash-locale=en" },
 	});
-	const resListEn = await middleware({ request: reqListEn, url: new URL(reqListEn.url) }, async () => {
+	const resListEn = await middleware(createContext({ request: reqListEn }), async () => {
 		return new Response(JSON.stringify(listPayload), {
 			status: 200,
 			headers: { "Content-Type": "application/json" },
@@ -605,12 +608,15 @@ test("GET /_emdash/api/taxonomies and /_emdash/api/taxonomies/[name] are localiz
 	const reqSingleUk = new Request("http://localhost:4321/_emdash/api/taxonomies/project_categories", {
 		headers: { Cookie: "emdash-locale=uk" },
 	});
-	const resSingleUk = await middleware({ request: reqSingleUk, url: new URL(reqSingleUk.url) }, async () => {
-		return new Response(JSON.stringify(singlePayload), {
-			status: 200,
-			headers: { "Content-Type": "application/json" },
-		});
-	});
+	const resSingleUk = await middleware(
+		createContext({ request: reqSingleUk, params: { name: "project_categories" } }),
+		async () => {
+			return new Response(JSON.stringify(singlePayload), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			});
+		},
+	);
 	const dataSingleUk = await resSingleUk.json();
 	assert.equal(dataSingleUk.data.taxonomy.label, "Категорії проєктів");
 	assert.equal(dataSingleUk.data.taxonomy.labelSingular, "Категорія проєкту");
@@ -636,7 +642,7 @@ test("GET /_emdash/api/taxonomies and /_emdash/api/taxonomies/[name] are localiz
 		const reqTerms = new Request(`http://localhost:4321${path}`, {
 			headers: { Cookie: "emdash-locale=uk" },
 		});
-		const resTerms = await middleware({ request: reqTerms, url: new URL(reqTerms.url) }, async () => {
+		const resTerms = await middleware(createContext({ request: reqTerms }), async () => {
 			return new Response(JSON.stringify(termsPayload), {
 				status: 200,
 				headers: { "Content-Type": "application/json" },
@@ -645,131 +651,371 @@ test("GET /_emdash/api/taxonomies and /_emdash/api/taxonomies/[name] are localiz
 		const dataTerms = await resTerms.json();
 		assert.equal(dataTerms.data.items[0].label, "Project categories");
 	}
-});
 
-test("GET /_emdash/api/taxonomies with Referer from taxonomy management screen is NOT localized", async () => {
-	const middleware = createLocalizationMiddleware({
+	// 5. Explicit localizeTaxonomies: false skips taxonomy definition localization
+	const mwDisabled = createLocalizationMiddleware({
+		localizeTaxonomies: false,
 		dictionary: {
 			uk: {
 				"Project categories": "Категорії проєктів",
-				"Project category": "Категорія проєкту",
 			},
 		},
 	});
+	const resDisabled = await mwDisabled(createContext({ request: reqSingleUk }), async () => {
+		return new Response(JSON.stringify(singlePayload), {
+			status: 200,
+			headers: { "Content-Type": "application/json" },
+		});
+	});
+	const dataDisabled = await resDisabled.json();
+	assert.equal(dataDisabled.data.taxonomy.label, "Project categories");
+});
 
-	const payload = {
-		success: true,
-		data: {
-			taxonomy: {
-				id: "tax_1",
-				name: "project_categories",
-				label: "Project categories",
-				labelSingular: "Project category",
-			},
+test("Real Astro context + EmDash SQLite DB: taxonomy GET/POST/PUT/DELETE with restoreTaxonomyLabelsOnWrite", async () => {
+	const I18N_KEY = Symbol.for("emdash:i18n-config");
+	const prevI18nConfig = globalThis[I18N_KEY];
+	globalThis[I18N_KEY] = {
+		defaultLocale: "en",
+		locales: ["en", "uk"],
+	};
+
+	const db = new Kysely({ dialect: createDialect({ url: ":memory:" }) });
+	await runMigrations(db);
+
+	const locals = {
+		emdash: { db },
+		user: { id: "admin-1", role: 100 },
+	};
+
+	const dictionary = {
+		uk: {
+			Categories: "Категорії",
+			Category: "Категорія",
+			"Project categories": "Категорії проєктів",
+			"Project category": "Категорія проєкту",
 		},
 	};
 
-	const request = new Request("http://localhost:4321/_emdash/api/taxonomies/project_categories", {
-		headers: {
-			Cookie: "emdash-locale=uk",
-			Referer: "http://localhost:4321/_emdash/admin/taxonomies/project_categories",
-		},
-	});
-
-	const response = await middleware({ request, url: new URL(request.url) }, async () => {
-		return new Response(JSON.stringify(payload), {
-			status: 200,
-			headers: { "Content-Type": "application/json" },
+	try {
+		const middleware = createLocalizationMiddleware({
+			dictionary,
+			restoreTaxonomyLabelsOnWrite: true,
 		});
-	});
 
-	const data = await response.json();
-	assert.equal(data.data.taxonomy.label, "Project categories");
-	assert.equal(data.data.taxonomy.labelSingular, "Project category");
-});
-
-test("PUT /_emdash/api/taxonomies/[name] with translated label restores original before saving", async () => {
-	const middleware = createLocalizationMiddleware({
-		dictionary: {
-			uk: {
-				"Project categories": "Категорії проєктів",
-				"Project category": "Категорія проєкту",
-				"taxonomies.custom_tax.label": "Спеціальна таксономія",
+		// 1. POST is never touched (even if body has a label matching dictionary translation)
+		const postEnReq = new Request("http://localhost:4321/_emdash/api/taxonomies", {
+			method: "POST",
+			headers: {
+				Cookie: "emdash-locale=uk",
+				"Content-Type": "application/json",
 			},
-		},
-	});
-
-	// 1. Reverse lookup directly from dictionary (even without a prior GET)
-	const putReq1 = new Request("http://localhost:4321/_emdash/api/taxonomies/project_categories", {
-		method: "PUT",
-		headers: {
-			Cookie: "emdash-locale=uk",
-			"Content-Type": "application/json",
-		},
-		body: JSON.stringify({
-			label: "Категорії проєктів",
-			labelSingular: "Категорія проєкту",
-			hierarchical: true,
-			collections: ["projects"],
-		}),
-	});
-
-	let savedBody1 = null;
-	const ctx1 = { request: putReq1, url: new URL(putReq1.url) };
-	await middleware(ctx1, async () => {
-		savedBody1 = await ctx1.request.json();
-		return new Response(JSON.stringify({ success: true }), {
-			status: 200,
-			headers: { "Content-Type": "application/json" },
-		});
-	});
-
-	assert.equal(savedBody1.label, "Project categories");
-	assert.equal(savedBody1.labelSingular, "Project category");
-	assert.equal(savedBody1.hierarchical, true);
-
-	// 2. Restore exact original from cached GET when using key-path override ("taxonomies.custom_tax.label")
-	const getReq = new Request("http://localhost:4321/_emdash/api/taxonomies/custom_tax", {
-		method: "GET",
-		headers: { Cookie: "emdash-locale=uk" },
-	});
-	await middleware({ request: getReq, url: new URL(getReq.url) }, async () => {
-		return new Response(
-			JSON.stringify({
-				data: {
-					taxonomy: {
-						name: "custom_tax",
-						label: "Custom Taxonomy Original",
-					},
-				},
+			body: JSON.stringify({
+				name: "project_categories",
+				label: "Project categories",
+				labelSingular: "Project category",
+				hierarchical: false,
+				locale: "en",
 			}),
-			{ status: 200, headers: { "Content-Type": "application/json" } },
-		);
-	});
-
-	const putReq2 = new Request("http://localhost:4321/_emdash/api/taxonomies/custom_tax", {
-		method: "PUT",
-		headers: {
-			Cookie: "emdash-locale=uk",
-			"Content-Type": "application/json",
-		},
-		body: JSON.stringify({
-			label: "Спеціальна таксономія",
-		}),
-	});
-
-	let savedBody2 = null;
-	const ctx2 = { request: putReq2, url: new URL(putReq2.url) };
-	await middleware(ctx2, async () => {
-		savedBody2 = await ctx2.request.json();
-		return new Response(JSON.stringify({ success: true }), {
-			status: 200,
-			headers: { "Content-Type": "application/json" },
 		});
+		const postEnCtx = createContext({ request: postEnReq, locals });
+		const postEnRes = await middleware(postEnCtx, () =>
+			taxonomiesIndexRoute.POST(postEnCtx),
+		);
+		assert.equal(postEnRes.status, 201);
+
+		// Create the `uk` definition row via POST with a Ukrainian label -> POST body is untouched
+		const postUkReq = new Request("http://localhost:4321/_emdash/api/taxonomies", {
+			method: "POST",
+			headers: {
+				Cookie: "emdash-locale=uk",
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({
+				name: "project_categories",
+				label: "Початкові категорії",
+				labelSingular: "Початкова категорія",
+				hierarchical: false,
+				locale: "uk",
+			}),
+		});
+		const postUkCtx = createContext({ request: postUkReq, locals });
+		const postUkRes = await middleware(postUkCtx, () =>
+			taxonomiesIndexRoute.POST(postUkCtx),
+		);
+		assert.equal(postUkRes.status, 201);
+		const postUkData = await postUkRes.json();
+		assert.equal(postUkData.data.taxonomy.label, "Початкові категорії");
+
+		// Verify default middleware (restoreTaxonomyLabelsOnWrite: false) localizes GET but does NOT touch PUT body
+		const defaultMiddleware = createLocalizationMiddleware({ dictionary });
+		const getDefReq = new Request(
+			"http://localhost:4321/_emdash/api/taxonomies/project_categories",
+			{
+				method: "GET",
+				headers: { Cookie: "emdash-locale=uk" },
+			},
+		);
+		const getDefCtx = createContext({
+			request: getDefReq,
+			params: { name: "project_categories" },
+			locals,
+		});
+		const getDefRes = await defaultMiddleware(getDefCtx, () =>
+			taxonomiesNameRoute.GET(getDefCtx),
+		);
+		const getDefData = await getDefRes.json();
+		assert.equal(getDefData.data.taxonomy.label, "Категорії проєктів");
+
+		const putNoRestoreReq = new Request(
+			"http://localhost:4321/_emdash/api/taxonomies/project_categories",
+			{
+				method: "PUT",
+				headers: {
+					Cookie: "emdash-locale=uk",
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({ label: "Категорії проєктів" }),
+			},
+		);
+		const putNoRestoreCtx = createContext({
+			request: putNoRestoreReq,
+			params: { name: "project_categories" },
+			locals,
+		});
+		let bodySeenByDefaultMw = null;
+		await defaultMiddleware(putNoRestoreCtx, async () => {
+			bodySeenByDefaultMw = await putNoRestoreCtx.request.clone().json();
+			return new Response(JSON.stringify({ success: true }), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			});
+		});
+		assert.equal(bodySeenByDefaultMw.label, "Категорії проєктів");
+
+		// 2. GET /_emdash/api/taxonomies/project_categories without ?locale= (reads `en` row, translates to `uk` via Cookie)
+		const getReq = new Request(
+			"http://localhost:4321/_emdash/api/taxonomies/project_categories",
+			{
+				method: "GET",
+				headers: { Cookie: "emdash-locale=uk" },
+			},
+		);
+		const getCtx = createContext({
+			request: getReq,
+			params: { name: "project_categories" },
+			locals,
+		});
+		const getRes = await middleware(getCtx, () => taxonomiesNameRoute.GET(getCtx));
+		const getData = await getRes.json();
+		assert.equal(getData.data.taxonomy.locale, "en");
+		assert.equal(getData.data.taxonomy.label, "Категорії проєктів");
+		assert.equal(getData.data.taxonomy.labelSingular, "Категорія проєкту");
+
+		// 3. PUT ?locale=uk with deliberate Ukrainian label ("Категорії проєктів") is NOT changed,
+		// and affects ONLY the `uk` row!
+		const putUkReq = new Request(
+			"http://localhost:4321/_emdash/api/taxonomies/project_categories?locale=uk",
+			{
+				method: "PUT",
+				headers: {
+					Cookie: "emdash-locale=uk",
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					label: "Категорії проєктів",
+					labelSingular: "Категорія проєкту",
+				}),
+			},
+		);
+		const putUkCtx = createContext({
+			request: putUkReq,
+			params: { name: "project_categories" },
+			locals,
+		});
+		const putUkRes = await middleware(putUkCtx, () => taxonomiesNameRoute.PUT(putUkCtx));
+		assert.equal(putUkRes.status, 200);
+
+		const rowsAfterPutUk = (
+			await db
+				.selectFrom("_emdash_taxonomy_defs")
+				.select(["locale", "label", "label_singular"])
+				.where("name", "=", "project_categories")
+				.orderBy("locale", "asc")
+				.execute()
+		).map((r) => ({ ...r }));
+		assert.deepEqual(rowsAfterPutUk, [
+			{
+				locale: "en",
+				label: "Project categories",
+				label_singular: "Project category",
+			},
+			{
+				locale: "uk",
+				label: "Категорії проєктів",
+				label_singular: "Категорія проєкту",
+			},
+		]);
+
+		// 4. PUT without ?locale= echoing back the translated label from previous GET
+		// restores original English label on the `en` row, and leaves `uk` row untouched!
+		const putDefaultEchoReq = new Request(
+			"http://localhost:4321/_emdash/api/taxonomies/project_categories",
+			{
+				method: "PUT",
+				headers: {
+					Cookie: "emdash-locale=uk",
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					label: "Категорії проєктів",
+					labelSingular: "Категорія проєкту",
+					hierarchical: true,
+				}),
+			},
+		);
+		const putDefaultEchoCtx = createContext({
+			request: putDefaultEchoReq,
+			params: { name: "project_categories" },
+			locals,
+		});
+		const putDefaultEchoRes = await middleware(putDefaultEchoCtx, () =>
+			taxonomiesNameRoute.PUT(putDefaultEchoCtx),
+		);
+		assert.equal(putDefaultEchoRes.status, 200);
+
+		const rowsAfterEchoPut = (
+			await db
+				.selectFrom("_emdash_taxonomy_defs")
+				.select(["locale", "label", "label_singular", "hierarchical"])
+				.where("name", "=", "project_categories")
+				.orderBy("locale", "asc")
+				.execute()
+		).map((r) => ({ ...r }));
+		assert.deepEqual(rowsAfterEchoPut, [
+			{
+				locale: "en",
+				label: "Project categories",
+				label_singular: "Project category",
+				hierarchical: 1,
+			},
+			{
+				locale: "uk",
+				label: "Категорії проєктів",
+				label_singular: "Категорія проєкту",
+				hierarchical: 1,
+			},
+		]);
+
+		// 5. PUT with a label that middleware NEVER served is NOT changed,
+		// and affects ONLY the target locale's row (`en` when ?locale= is omitted)!
+		const putCustomReq = new Request(
+			"http://localhost:4321/_emdash/api/taxonomies/project_categories",
+			{
+				method: "PUT",
+				headers: {
+					Cookie: "emdash-locale=uk",
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					label: "Portfolio Categories",
+					labelSingular: "Portfolio Category",
+				}),
+			},
+		);
+		const putCustomCtx = createContext({
+			request: putCustomReq,
+			params: { name: "project_categories" },
+			locals,
+		});
+		const putCustomRes = await middleware(putCustomCtx, () =>
+			taxonomiesNameRoute.PUT(putCustomCtx),
+		);
+		assert.equal(putCustomRes.status, 200);
+
+		const rowsAfterCustomPut = (
+			await db
+				.selectFrom("_emdash_taxonomy_defs")
+				.select(["locale", "label", "label_singular"])
+				.where("name", "=", "project_categories")
+				.orderBy("locale", "asc")
+				.execute()
+		).map((r) => ({ ...r }));
+		assert.deepEqual(rowsAfterCustomPut, [
+			{
+				locale: "en",
+				label: "Portfolio Categories",
+				label_singular: "Portfolio Category",
+			},
+			{
+				locale: "uk",
+				label: "Категорії проєктів",
+				label_singular: "Категорія проєкту",
+			},
+		]);
+
+		// 6. DELETE request and its body are never touched
+		const deleteReq = new Request(
+			"http://localhost:4321/_emdash/api/taxonomies/project_categories",
+			{
+				method: "DELETE",
+				headers: {
+					Cookie: "emdash-locale=uk",
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({ label: "Категорії проєктів" }),
+			},
+		);
+		const deleteCtx = createContext({
+			request: deleteReq,
+			params: { name: "project_categories" },
+			locals,
+		});
+		let deleteBodyAtHandler = null;
+		const deleteRes = await middleware(deleteCtx, async () => {
+			deleteBodyAtHandler = await deleteCtx.request.clone().json();
+			return taxonomiesNameRoute.DELETE(deleteCtx);
+		});
+		assert.equal(deleteRes.status, 200);
+		assert.equal(deleteBodyAtHandler.label, "Категорії проєктів");
+
+		const remainingRows = await db
+			.selectFrom("_emdash_taxonomy_defs")
+			.select(["id"])
+			.where("name", "=", "project_categories")
+			.execute();
+		assert.equal(remainingRows.length, 0);
+	} finally {
+		globalThis[I18N_KEY] = prevI18nConfig;
+		await db.destroy();
+	}
+});
+
+test("TaxonomyTranslationCache enforces bounded size and TTL expiration", () => {
+	let currentTime = 1_000;
+	const cache = new TaxonomyTranslationCache({
+		maxSize: 2,
+		ttlMs: 5_000,
+		now: () => currentTime,
 	});
 
-	assert.equal(savedBody2.label, "Custom Taxonomy Original");
+	cache.set("tax_a", "en", "label", "Таксономія А", "Taxonomy A");
+	cache.set("tax_b", "en", "label", "Таксономія Б", "Taxonomy B");
+	assert.equal(cache.size, 2);
+
+	// Adding a 3rd entry evicts the oldest ("tax_a")
+	cache.set("tax_c", "en", "label", "Таксономія В", "Taxonomy C");
+	assert.equal(cache.size, 2);
+	assert.equal(cache.getOriginal("tax_a", "en", "label", "Таксономія А"), undefined);
+	assert.equal(cache.getOriginal("tax_b", "en", "label", "Таксономія Б"), "Taxonomy B");
+	assert.equal(cache.getOriginal("tax_c", "en", "label", "Таксономія В"), "Taxonomy C");
+
+	// Advance clock past TTL -> entries expire
+	currentTime += 6_000;
+	assert.equal(cache.getOriginal("tax_b", "en", "label", "Таксономія Б"), undefined);
+	assert.equal(cache.getOriginal("tax_c", "en", "label", "Таксономія В"), undefined);
+	assert.equal(cache.size, 0);
 });
+
 
 
 
