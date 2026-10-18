@@ -100,17 +100,17 @@ function extractCookieLocale(request, fallback) {
  * Resolves the admin UI locale from an incoming HTTP Request.
  *
  * Precedence (default):
- * 1. Query parameter `locale` (unless `options.allowQueryParam === false`)
- * 2. Cookie `emdash-locale` (unless `options.useCookie === false`; checked before query if `options.preferCookieOverQuery === true`)
- * 3. Header `Accept-Language` (unless `options.useAcceptLanguage === false`)
+ * 1. Cookie `emdash-locale` (unless `options.useCookie === false`)
+ * 2. Query parameter `locale` (only when `options.allowQueryParam === true`; checked before cookie unless `options.preferCookieOverQuery === true`)
+ * 3. Header `Accept-Language` (only when `options.useAcceptLanguage === true`)
  * 4. Fallback `defaultLocale` (default `"en"`)
  *
  * @param {Request} request
  * @param {string} [defaultLocale="en"]
  * @param {object} [options]
  * @param {boolean} [options.useCookie=true]
- * @param {boolean} [options.useAcceptLanguage=true]
- * @param {boolean} [options.allowQueryParam=true]
+ * @param {boolean} [options.useAcceptLanguage=false]
+ * @param {boolean} [options.allowQueryParam=false]
  * @param {boolean} [options.preferCookieOverQuery=false]
  * @returns {string}
  */
@@ -120,8 +120,8 @@ export function resolveAdminLocale(request, defaultLocale = "en", options = {}) 
 
 	const {
 		useCookie = true,
-		useAcceptLanguage = true,
-		allowQueryParam = true,
+		useAcceptLanguage = false,
+		allowQueryParam = false,
 		preferCookieOverQuery = false,
 	} = options;
 
@@ -425,8 +425,10 @@ export function localizeManifest(manifest, locale, options = {}) {
 		});
 	}
 
-	// 4. Localize Taxonomies
-	if (Array.isArray(localized.taxonomies)) {
+	// 4. Localize Taxonomies (controlled by localizeManifestTaxonomies ?? localizeTaxonomies ?? true)
+	const shouldLocalizeManifestTaxonomies =
+		options.localizeManifestTaxonomies ?? options.localizeTaxonomies ?? true;
+	if (shouldLocalizeManifestTaxonomies && Array.isArray(localized.taxonomies)) {
 		localized.taxonomies = localized.taxonomies.map((tax) =>
 			localizeSingleTaxonomy(tax, locale, options),
 		);
@@ -774,8 +776,8 @@ export function extractRawTaxonomies(data) {
  * Bounded TTL cache storing `{ served -> original }` mappings for taxonomy definition
  * fields that middleware localized during `GET /_emdash/api/taxonomies...` responses.
  *
- * Keyed by `name + locale + field` where `locale` is the target taxonomy definition
- * record's locale (from `taxonomy.locale` / `?locale=` / `defaultLocale`).
+ * Keyed by `sessionScope + name + locale + field` where `locale` is the target taxonomy
+ * definition record's locale (from `taxonomy.locale` / `?locale=` / `defaultLocale`).
  */
 export class TaxonomyTranslationCache {
 	/**
@@ -796,10 +798,11 @@ export class TaxonomyTranslationCache {
 	 * @param {string} name
 	 * @param {string} locale
 	 * @param {string} field
+	 * @param {string} [sessionScope="anon"]
 	 * @returns {string}
 	 */
-	makeKey(name, locale, field) {
-		return `${name}\0${locale}\0${field}`;
+	makeKey(name, locale, field, sessionScope = "anon") {
+		return `${sessionScope || "anon"}\0${name}\0${locale}\0${field}`;
 	}
 
 	/**
@@ -815,15 +818,16 @@ export class TaxonomyTranslationCache {
 	}
 
 	/**
-	 * Records that for `(name, locale, field)`, middleware replaced `original` with `served`.
+	 * Records that for `(sessionScope, name, locale, field)`, middleware replaced `original` with `served`.
 	 *
 	 * @param {string} name
 	 * @param {string} locale
 	 * @param {string} field
 	 * @param {string} served
 	 * @param {string} original
+	 * @param {string} [sessionScope="anon"]
 	 */
-	set(name, locale, field, served, original) {
+	set(name, locale, field, served, original, sessionScope = "anon") {
 		if (
 			!name ||
 			!locale ||
@@ -835,7 +839,7 @@ export class TaxonomyTranslationCache {
 			return;
 		}
 		const currentTime = this.now();
-		const key = this.makeKey(name, locale, field);
+		const key = this.makeKey(name, locale, field, sessionScope);
 
 		if (this.entries.has(key)) {
 			this.entries.delete(key);
@@ -856,17 +860,18 @@ export class TaxonomyTranslationCache {
 	}
 
 	/**
-	 * Returns `original` if and only if `(name, locale, field)` has a non-expired
+	 * Returns `original` if and only if `(sessionScope, name, locale, field)` has a non-expired
 	 * entry whose `served` value equals `incomingValue`.
 	 *
 	 * @param {string} name
 	 * @param {string} locale
 	 * @param {string} field
 	 * @param {string} incomingValue
+	 * @param {string} [sessionScope="anon"]
 	 * @returns {string | undefined}
 	 */
-	getOriginal(name, locale, field, incomingValue) {
-		const key = this.makeKey(name, locale, field);
+	getOriginal(name, locale, field, incomingValue, sessionScope = "anon") {
+		const key = this.makeKey(name, locale, field, sessionScope);
 		const entry = this.entries.get(key);
 		if (!entry) return undefined;
 
@@ -879,14 +884,15 @@ export class TaxonomyTranslationCache {
 	}
 
 	/**
-	 * Removes a cached entry for `(name, locale, field)`.
+	 * Removes a cached entry for `(sessionScope, name, locale, field)`.
 	 *
 	 * @param {string} name
 	 * @param {string} locale
 	 * @param {string} field
+	 * @param {string} [sessionScope="anon"]
 	 */
-	delete(name, locale, field) {
-		this.entries.delete(this.makeKey(name, locale, field));
+	delete(name, locale, field, sessionScope = "anon") {
+		this.entries.delete(this.makeKey(name, locale, field, sessionScope));
 	}
 
 	get size() {
@@ -902,7 +908,8 @@ export class TaxonomyTranslationCache {
  * @param {any} localizedData
  * @param {string | undefined} fallbackRowLocale
  * @param {string} defaultLocale
- * @param {TaxonomyTranslationCache} cache
+ * @param {TaxonomyTranslationCache | null | undefined} cache
+ * @param {string | string[]} [sessionScopes="anon"]
  */
 export function recordTaxonomyTranslations(
 	rawData,
@@ -910,12 +917,16 @@ export function recordTaxonomyTranslations(
 	fallbackRowLocale,
 	defaultLocale,
 	cache,
+	sessionScopes = "anon",
 ) {
 	if (!cache) return;
 	const rawList = extractRawTaxonomies(rawData);
 	const locList = extractRawTaxonomies(localizedData);
 	const normDefault = normalizeLocale(defaultLocale, "en");
 	const normFallback = normalizeLocale(fallbackRowLocale || normDefault, normDefault);
+	const scopes = Array.isArray(sessionScopes)
+		? [...new Set(sessionScopes.filter(Boolean))]
+		: [sessionScopes || "anon"];
 
 	for (let i = 0; i < rawList.length; i++) {
 		const rawTax = rawList[i];
@@ -935,7 +946,9 @@ export function recordTaxonomyTranslations(
 			const origVal = rawTax[prop];
 			const servedVal = locTax[prop];
 			if (typeof origVal === "string" && typeof servedVal === "string" && servedVal !== origVal) {
-				cache.set(taxName, rowLocale, prop, servedVal, origVal);
+				for (const scope of scopes) {
+					cache.set(taxName, rowLocale, prop, servedVal, origVal, scope);
+				}
 			}
 		}
 	}
@@ -944,13 +957,14 @@ export function recordTaxonomyTranslations(
 /**
  * Restores canonical original `label` and `labelSingular` on a taxonomy definition
  * update payload (`PUT /_emdash/api/taxonomies/[name]`) if and only if the incoming
- * value matches the translation previously served by `GET` for `(taxonomyName, targetLocale, field)`.
+ * value matches the translation previously served by `GET` for `(sessionScope, taxonomyName, targetLocale, field)`.
  *
  * @param {any} input
  * @param {string} taxonomyName
  * @param {string} targetLocale Target definition record's locale (from `?locale=` or `defaultLocale`).
  * @param {object} [options]
- * @param {TaxonomyTranslationCache} [cache]
+ * @param {TaxonomyTranslationCache | null | undefined} [cache]
+ * @param {string} [sessionScope="anon"]
  * @returns {{ body: any, changed: boolean }}
  */
 export function restoreOriginalTaxonomyInput(
@@ -959,6 +973,7 @@ export function restoreOriginalTaxonomyInput(
 	targetLocale,
 	options = {},
 	cache = undefined,
+	sessionScope = "anon",
 ) {
 	if (!input || typeof input !== "object" || Array.isArray(input) || !cache) {
 		return { body: input, changed: false };
@@ -974,16 +989,215 @@ export function restoreOriginalTaxonomyInput(
 		const incomingVal = restored[prop];
 		if (typeof incomingVal !== "string" || !incomingVal) continue;
 
-		const origVal = cache.getOriginal(taxonomyName, rowLocale, prop, incomingVal);
+		const origVal = cache.getOriginal(taxonomyName, rowLocale, prop, incomingVal, sessionScope);
 		if (typeof origVal === "string" && origVal !== incomingVal) {
 			restored[prop] = origVal;
 			changed = true;
 		} else {
 			// Deliberate write with a new value: invalidate any stale cached entry for this field
-			cache.delete(taxonomyName, rowLocale, prop);
+			cache.delete(taxonomyName, rowLocale, prop, sessionScope);
 		}
 	}
 
 	return { body: restored, changed };
 }
+
+const SEED_TARGET_KEYS = new Set([
+	"label",
+	"labelSingular",
+	"description",
+	"category",
+	"group",
+	"placeholder",
+	"hint",
+]);
+
+/**
+ * Extracts all translatable canonical source strings from an EmDash `seed` object.
+ *
+ * @param {any} seed
+ * @param {object} [options]
+ * @param {Set<string>} [options.knownPhrases] Existing dictionary source phrases that should not be split on `" / "`.
+ * @param {boolean} [options.cleanSeed=false] Whether to strip bilingual `" / "` prefixes in-place on `seed`.
+ * @returns {{ keys: string[], inlineTranslations: Map<string, string> }}
+ */
+export function extractSeedStrings(seed, options = {}) {
+	const { knownPhrases = new Set(), cleanSeed = false } = options;
+	/** @type {Set<string>} */
+	const keysSet = new Set();
+	/** @type {Map<string, string>} */
+	const inlineTranslations = new Map();
+
+	if (!seed || typeof seed !== "object") {
+		return { keys: [], inlineTranslations };
+	}
+
+	function processString(str, parentObj, key) {
+		if (!str || typeof str !== "string") return str;
+		const trimmed = str.trim();
+		if (!trimmed) return str;
+
+		if (str.includes(" / ") && !knownPhrases.has(trimmed)) {
+			const parts = str.split(" / ");
+			if (parts.length === 2) {
+				const firstPart = parts[0].trim();
+				const en = parts[1].trim();
+				if (en) {
+					keysSet.add(en);
+					if (firstPart && !inlineTranslations.has(en)) {
+						inlineTranslations.set(en, firstPart);
+					}
+					if (cleanSeed && parentObj && key !== undefined) {
+						parentObj[key] = en;
+					}
+					return en;
+				}
+			}
+		}
+
+		keysSet.add(trimmed);
+		return trimmed;
+	}
+
+	function deepWalk(obj, parentKey = "") {
+		if (!obj || typeof obj !== "object") return;
+		if (Array.isArray(obj)) {
+			for (let i = 0; i < obj.length; i++) {
+				const item = obj[i];
+				if (
+					typeof item === "string" &&
+					(item.includes(" / ") || parentKey === "options")
+				) {
+					processString(item, obj, i);
+				} else if (item && typeof item === "object") {
+					deepWalk(item, parentKey);
+				}
+			}
+			return;
+		}
+		for (const [k, v] of Object.entries(obj)) {
+			if (typeof v === "string" && SEED_TARGET_KEYS.has(k)) {
+				processString(v, obj, k);
+			} else if (typeof v === "object" && v !== null) {
+				deepWalk(v, k);
+			}
+		}
+	}
+
+	if (Array.isArray(seed.blockTypes)) {
+		deepWalk(seed.blockTypes);
+	} else if (seed.blockTypes && typeof seed.blockTypes === "object") {
+		deepWalk(seed.blockTypes);
+	}
+
+	if (Array.isArray(seed.collections)) {
+		deepWalk(seed.collections);
+	} else if (seed.collections && typeof seed.collections === "object") {
+		deepWalk(seed.collections);
+	}
+
+	const taxonomyEntries = Array.isArray(seed.taxonomies)
+		? seed.taxonomies
+		: seed.taxonomies && typeof seed.taxonomies === "object"
+			? Object.values(seed.taxonomies)
+			: [];
+	for (const tax of taxonomyEntries) {
+		if (tax && typeof tax === "object") {
+			if (typeof tax.label === "string") {
+				processString(tax.label, tax, "label");
+			}
+			if (typeof tax.labelSingular === "string") {
+				processString(tax.labelSingular, tax, "labelSingular");
+			}
+		}
+	}
+
+	if (Array.isArray(seed.menus)) {
+		for (const menu of seed.menus) {
+			if (menu && typeof menu === "object" && typeof menu.name === "string") {
+				processString(menu.name, menu, "name");
+			}
+		}
+	}
+
+	return { keys: [...keysSet], inlineTranslations };
+}
+
+/**
+ * Verifies that every translatable string in `seed` has a non-empty translation
+ * in `dictionary` for each locale in `locales`. Throws an Error (with `.missing`)
+ * if any translations are missing.
+ *
+ * @param {any} seed Parsed EmDash seed JSON object.
+ * @param {Record<string, Record<string, string>>} dictionary Translation dictionary.
+ * @param {string | string[]} [locales=["uk"]] Target locale(s) to verify (e.g. `["uk"]` or `["uk", "de"]`).
+ * @returns {{ covered: true, keys: string[], locales: string[] }}
+ */
+export function assertDictionaryCovers(seed, dictionary, locales = ["uk"]) {
+	const targetLocales = (
+		Array.isArray(locales)
+			? locales
+			: typeof locales === "string"
+				? locales.split(",")
+				: ["uk"]
+	)
+		.map((l) => String(l).trim())
+		.filter(Boolean);
+
+	if (targetLocales.length === 0) {
+		targetLocales.push("uk");
+	}
+
+	const knownPhrases =
+		dictionary && typeof dictionary === "object"
+			? getKnownDictionaryPhrases(dictionary)
+			: new Set();
+	const { keys } = extractSeedStrings(seed, { knownPhrases });
+
+	/** @type {Record<string, string[]>} */
+	const missing = {};
+	const lines = [];
+
+	for (const locale of targetLocales) {
+		const localeDict =
+			dictionary &&
+			typeof dictionary === "object" &&
+			Object.hasOwn(dictionary, locale) &&
+			dictionary[locale] &&
+			typeof dictionary[locale] === "object"
+				? dictionary[locale]
+				: undefined;
+
+		const missingForLocale = [];
+		for (const key of keys) {
+			const val =
+				localeDict && Object.hasOwn(localeDict, key) ? localeDict[key] : undefined;
+			if (typeof val !== "string" || val.trim().length === 0) {
+				missingForLocale.push(key);
+			}
+		}
+
+		if (missingForLocale.length > 0) {
+			missing[locale] = missingForLocale;
+			lines.push(
+				`  [${locale}] (${missingForLocale.length} missing): ${missingForLocale.map((k) => JSON.stringify(k)).join(", ")}`,
+			);
+		}
+	}
+
+	if (lines.length > 0) {
+		const err = new Error(
+			`[emdash-schema-i18n] Missing schema translations in dictionary:\n${lines.join("\n")}`,
+		);
+		/** @type {any} */ (err).missing = missing;
+		throw err;
+	}
+
+	return {
+		covered: true,
+		keys,
+		locales: targetLocales,
+	};
+}
+
 

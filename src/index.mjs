@@ -3,6 +3,10 @@ import {
 	createLocalizationMiddleware,
 	withSchemaLocalization,
 	RELOAD_WATCHER_SCRIPT,
+	DEFAULT_MAX_RESTORE_BODY_BYTES,
+	isJsonMimeType,
+	resolveSessionScope,
+	validateMiddlewareOptions,
 } from "./middleware.mjs";
 import {
 	localizeManifest,
@@ -14,6 +18,8 @@ import {
 	TaxonomyTranslationCache,
 	recordTaxonomyTranslations,
 	restoreOriginalTaxonomyInput,
+	extractSeedStrings,
+	assertDictionaryCovers,
 	localizeString,
 	resolveAdminLocale,
 	normalizeLocale,
@@ -22,7 +28,7 @@ import {
 
 const pluginId = "schema-i18n";
 const pluginName = "Schema & Blocks i18n";
-const version = "1.3.1";
+const version = "1.4.0";
 const description = "Dynamic schema, collections, and block types localization for EmDash CMS Admin UI";
 const author = "Serhii Parshyn";
 const packageEntrypoint = "emdash-schema-i18n";
@@ -66,6 +72,10 @@ export {
 	createLocalizationMiddleware,
 	withSchemaLocalization,
 	RELOAD_WATCHER_SCRIPT,
+	DEFAULT_MAX_RESTORE_BODY_BYTES,
+	isJsonMimeType,
+	resolveSessionScope,
+	validateMiddlewareOptions,
 	localizeManifest,
 	localizeBlockTypesResponse,
 	localizeBlockTypeResponse,
@@ -75,6 +85,8 @@ export {
 	TaxonomyTranslationCache,
 	recordTaxonomyTranslations,
 	restoreOriginalTaxonomyInput,
+	extractSeedStrings,
+	assertDictionaryCovers,
 	localizeString,
 	resolveAdminLocale,
 	normalizeLocale,

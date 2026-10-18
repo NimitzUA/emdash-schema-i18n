@@ -7,24 +7,34 @@ import {
 	localizeCollectionsResponse,
 	resolveAdminLocale,
 	normalizeLocale,
+	extractSeedStrings,
+	assertDictionaryCovers,
 } from "../src/localizer.mjs";
 
-test("resolveAdminLocale extracts locale correctly", () => {
-	// 1. From query param
-	const reqWithQuery = new Request("http://localhost:4321/_emdash/api/manifest?locale=uk");
-	assert.equal(resolveAdminLocale(reqWithQuery), "uk");
+test("resolveAdminLocale extracts locale correctly (strict cookie default, opt-in query & Accept-Language)", () => {
+	// 1. Default: ?locale= and Accept-Language are ignored unless opted in
+	const reqWithQueryOnly = new Request("http://localhost:4321/_emdash/api/manifest?locale=uk");
+	assert.equal(resolveAdminLocale(reqWithQueryOnly), "en");
+	assert.equal(
+		resolveAdminLocale(reqWithQueryOnly, "en", { allowQueryParam: true }),
+		"uk",
+	);
 
-	// 2. From cookie
+	// 2. From cookie (enabled by default)
 	const reqWithCookie = new Request("http://localhost:4321/_emdash/api/manifest", {
 		headers: { cookie: "other=1; emdash-locale=uk-UA; foo=bar" },
 	});
 	assert.equal(resolveAdminLocale(reqWithCookie), "uk");
 
-	// 3. From Accept-Language
+	// 3. From Accept-Language (when useAcceptLanguage: true)
 	const reqWithHeader = new Request("http://localhost:4321/_emdash/api/manifest", {
 		headers: { "accept-language": "uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7" },
 	});
-	assert.equal(resolveAdminLocale(reqWithHeader), "uk");
+	assert.equal(resolveAdminLocale(reqWithHeader), "en");
+	assert.equal(
+		resolveAdminLocale(reqWithHeader, "en", { useAcceptLanguage: true }),
+		"uk",
+	);
 
 	// 4. Default fallback
 	const reqEmpty = new Request("http://localhost:4321/_emdash/api/manifest");
@@ -272,7 +282,7 @@ test("createLocalizationMiddleware injects reload watcher script into admin HTML
 	assert.ok(text.endsWith("</body></html>"));
 });
 
-test("localizeManifest localizes collection group, taxonomies, and plugin UI contributions", () => {
+test("localizeManifest localizes collection group, taxonomies, and plugin UI contributions (and respects localizeManifestTaxonomies)", () => {
 	const manifest = {
 		collections: {
 			articles: {
@@ -332,13 +342,24 @@ test("localizeManifest localizes collection group, taxonomies, and plugin UI con
 	assert.equal(localized.plugins.seo.editorPanels[0].label, "Панель SEO");
 	assert.equal(localized.plugins.seo.editorPanels[0].title, "Чекліст SEO");
 	assert.equal(localized.plugins.seo.editorActions[0].label, "Запустити SEO-аудит");
+
+	// When localizeManifestTaxonomies: false or localizeTaxonomies: false, manifest.taxonomies is untouched
+	const withoutManifestTax = localizeManifest(manifest, "uk", {
+		dictionary: dict,
+		localizeManifestTaxonomies: false,
+	});
+	assert.equal(withoutManifestTax.collections.articles.label, "Статті");
+	assert.equal(withoutManifestTax.taxonomies[0].label, "Categories");
 });
 
-test("resolveAdminLocale respects Accept-Language quality weights and POSIX underscore locales", () => {
+test("resolveAdminLocale respects Accept-Language quality weights and POSIX underscore locales when useAcceptLanguage: true", () => {
 	const reqWithWeights = new Request("http://localhost:4321/_emdash/api/manifest", {
 		headers: { "accept-language": "*;q=0.1, en_US;q=0.7, uk_UA;q=0.9" },
 	});
-	assert.equal(resolveAdminLocale(reqWithWeights), "uk");
+	assert.equal(
+		resolveAdminLocale(reqWithWeights, "en", { useAcceptLanguage: true }),
+		"uk",
+	);
 });
 
 test("normalizeLocale respects defaultLocale when given empty or whitespace code", () => {
@@ -348,7 +369,7 @@ test("normalizeLocale respects defaultLocale when given empty or whitespace code
 	assert.equal(normalizeLocale("de_DE", "uk"), "de");
 });
 
-test("resolveAdminLocale respects useAcceptLanguage: false, allowQueryParam: false, useCookie: false, and preferCookieOverQuery: true", () => {
+test("resolveAdminLocale respects useAcceptLanguage, allowQueryParam, useCookie, and preferCookieOverQuery", () => {
 	const reqHeaderOnly = new Request("http://localhost:4321/_emdash/api/manifest", {
 		headers: { "accept-language": "uk-UA,uk;q=0.9" },
 	});
@@ -371,13 +392,24 @@ test("resolveAdminLocale respects useAcceptLanguage: false, allowQueryParam: fal
 		"uk",
 	);
 	assert.equal(
-		resolveAdminLocale(reqWithQueryAndCookie, "en", { preferCookieOverQuery: true }),
+		resolveAdminLocale(reqWithQueryAndCookie, "en", {
+			allowQueryParam: true,
+			preferCookieOverQuery: false,
+		}),
+		"pl",
+	);
+	assert.equal(
+		resolveAdminLocale(reqWithQueryAndCookie, "en", {
+			allowQueryParam: true,
+			preferCookieOverQuery: true,
+		}),
 		"uk",
 	);
 	assert.equal(
 		resolveAdminLocale(reqWithQueryAndCookie, "en", {
 			allowQueryParam: false,
 			useCookie: false,
+			useAcceptLanguage: true,
 		}),
 		"de",
 	);
@@ -418,5 +450,80 @@ test("localizeManifest supports custom separator and splitBilingual: false", () 
 	assert.equal(noSplitUk.collections.posts.label, "Записи / Posts");
 });
 
+test("extractSeedStrings and assertDictionaryCovers verify dictionary completeness across multiple locales", () => {
+	const seed = {
+		collections: [
+			{
+				slug: "projects",
+				label: "Projects",
+				labelSingular: "Project",
+				fields: [
+					{ slug: "title", label: "Title" },
+				],
+			},
+		],
+		taxonomies: [
+			{
+				name: "project_categories",
+				label: "Project categories",
+				labelSingular: "Project category",
+			},
+		],
+		menus: [{ slug: "main", name: "Main navigation" }],
+	};
 
+	const extracted = extractSeedStrings(seed);
+	assert.deepEqual(extracted.keys.sort(), [
+		"Main navigation",
+		"Project",
+		"Project categories",
+		"Project category",
+		"Projects",
+		"Title",
+	]);
 
+	const completeDict = {
+		uk: {
+			Projects: "Проєкти",
+			Project: "Проєкт",
+			Title: "Заголовок",
+			"Project categories": "Категорії проєктів",
+			"Project category": "Категорія проєкту",
+			"Main navigation": "Головна навігація",
+		},
+		de: {
+			Projects: "Projekte",
+			Project: "Projekt",
+			Title: "Titel",
+			"Project categories": "Projektkategorien",
+			"Project category": "Projektkategorie",
+			"Main navigation": "Hauptnavigation",
+		},
+	};
+
+	const res = assertDictionaryCovers(seed, completeDict, ["uk", "de"]);
+	assert.equal(res.covered, true);
+	assert.deepEqual(res.locales, ["uk", "de"]);
+
+	// Incomplete dictionary throws with `.missing` breakdown
+	const incompleteDict = {
+		uk: {
+			...completeDict.uk,
+			"Project categories": "",
+		},
+		de: {
+			Projects: "Projekte",
+		},
+	};
+
+	assert.throws(
+		() => assertDictionaryCovers(seed, incompleteDict, ["uk", "de"]),
+		(err) => {
+			assert.ok(err.message.includes("[uk] (1 missing)"));
+			assert.ok(err.message.includes("[de] (5 missing)"));
+			assert.deepEqual(err.missing.uk, ["Project categories"]);
+			assert.equal(err.missing.de.length, 5);
+			return true;
+		},
+	);
+});

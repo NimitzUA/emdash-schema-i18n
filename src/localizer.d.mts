@@ -5,6 +5,8 @@ export interface LocalizeOptions {
 	splitBilingual?: boolean;
 	separatorLocales?: string[];
 	defaultLocale?: string;
+	localizeTaxonomies?: boolean;
+	localizeManifestTaxonomies?: boolean;
 }
 
 export interface ResolveLocaleOptions {
@@ -77,7 +79,12 @@ export declare class TaxonomyTranslationCache {
 		ttlMs?: number;
 		now?: () => number;
 	});
-	makeKey(name: string, locale: string, field: string): string;
+	makeKey(
+		name: string,
+		locale: string,
+		field: string,
+		sessionScope?: string,
+	): string;
 	pruneExpired(currentTime?: number): void;
 	set(
 		name: string,
@@ -85,14 +92,21 @@ export declare class TaxonomyTranslationCache {
 		field: string,
 		served: string,
 		original: string,
+		sessionScope?: string,
 	): void;
 	getOriginal(
 		name: string,
 		locale: string,
 		field: string,
 		incomingValue: string,
+		sessionScope?: string,
 	): string | undefined;
-	delete(name: string, locale: string, field: string): void;
+	delete(
+		name: string,
+		locale: string,
+		field: string,
+		sessionScope?: string,
+	): void;
 	readonly size: number;
 }
 
@@ -102,6 +116,7 @@ export declare function recordTaxonomyTranslations(
 	fallbackRowLocale: string | undefined,
 	defaultLocale: string,
 	cache: TaxonomyTranslationCache,
+	sessionScope?: string,
 ): void;
 
 export declare function restoreOriginalTaxonomyInput<T = any>(
@@ -110,5 +125,26 @@ export declare function restoreOriginalTaxonomyInput<T = any>(
 	targetLocale: string,
 	options?: LocalizeOptions,
 	cache?: TaxonomyTranslationCache,
+	sessionScope?: string,
 ): { body: T; changed: boolean };
 
+export declare function extractSeedStrings(
+	seed: any,
+	options?: {
+		cleanSeed?: boolean;
+		knownPhrases?: Set<string>;
+	},
+): {
+	keys: string[];
+	inlineTranslations: Map<string, string>;
+};
+
+export declare function assertDictionaryCovers(
+	seed: any,
+	dictionary: Record<string, Record<string, string>>,
+	locales?: string[] | string,
+): {
+	covered: true;
+	keys: string[];
+	locales: string[];
+};

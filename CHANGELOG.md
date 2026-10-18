@@ -2,6 +2,30 @@
 
 All notable changes to `emdash-schema-i18n` are documented in this file.
 
+## [1.4.0] - 2026-10-18
+
+> **⚠️ Breaking Default Changes in `1.4.0` (Safer Opt-In Defaults):**
+> - **`localizeTaxonomies` now defaults to `false`** (previously `true` in `1.3.x`). Pass `localizeTaxonomies: true` to `createLocalizationMiddleware` / `withSchemaLocalization` to localize `/_emdash/api/taxonomies` and `manifest.taxonomies`.
+> - **`allowQueryParam` and `useAcceptLanguage` now default to `false`** (previously `true`). By default, admin locale is resolved strictly from the `emdash-locale` cookie (falling back to `defaultLocale`), ensuring UI and schema labels never diverge on first visit. Pass `allowQueryParam: true` or `useAcceptLanguage: true` to re-enable query or header locale resolution.
+
+### Added
+- **Multi-Locale CLI Scaffolding (`--locales uk,de`)**: `emdash-schema-i18n extract` now accepts `--locales=uk,de` (or `--locales uk,de`) to scaffold entries for all listed locales simultaneously.
+- **CLI CI Verification (`--check`)**: Added `emdash-schema-i18n extract --check` which exits with code `1` and lists any untranslated `seed.json` strings per locale without modifying files.
+- **Test Helper (`assertDictionaryCovers(seed, dictionary, locales)`)**: Exported `assertDictionaryCovers` and `extractSeedStrings` from `emdash-schema-i18n` so projects can verify dictionary coverage in unit tests with a single call.
+- **Independent `localizeManifestTaxonomies` Option**: Added `localizeManifestTaxonomies` to control `manifest.taxonomies` translation independently (defaults to `localizeTaxonomies`).
+- **Startup Option Validation (`validateMiddlewareOptions`)**: `createLocalizationMiddleware` now validates option names and value types at startup and logs `console.warn` messages for unknown keys (e.g. typo `localiseTaxonomies`) or invalid types.
+- **Request Body Size Limit (`maxRestoreBodyBytes`)**: Added `maxRestoreBodyBytes` (default `65536` = 64 KiB) to skip `PUT`/`PATCH` taxonomy restoration when `Content-Length` or streamed body bytes exceed the limit.
+- **Session/User-Scoped Taxonomy Cache (`resolveSessionScope`)**: Scoped `TaxonomyTranslationCache` keys by `sessionScope + name + locale + field` (using `locals.user.id`, `Authorization` header, or session cookies) so cached translations cannot leak across concurrent editors.
+- **Documentation**: Added the EmDash 1.3.0 Admin UI Screen vs Endpoint Safety Matrix and single-process cache notes to `README.md`.
+
+### Fixed
+- **Safe Request Body Cancellation Order**: When `restoreTaxonomyLabelsOnWrite: true` replaces `context.request`, `originalRequest.body?.cancel()` is now called **only after** `context.request` has been replaced, keeping the original request intact if anything fails.
+- **Strict JSON MIME Parsing (`isJsonMimeType`)**: Middleware now parses the MIME type and only accepts `application/json` and `*+json` instead of matching any header containing `"json"`.
+- **Conflict Guard for `?locale=` vs `body.locale`**: Documented fallback to `body.locale` on `PUT`/`PATCH` and skipped restoration whenever both `?locale=` and `body.locale` are present and resolve to different locales.
+- **Lazy Cache Instantiation**: `TaxonomyTranslationCache` is no longer instantiated when `restoreTaxonomyLabelsOnWrite` is `false`.
+
+---
+
 ## [1.3.1] - 2026-10-18
 
 ### Changed

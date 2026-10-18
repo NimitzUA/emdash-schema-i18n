@@ -2,16 +2,21 @@
 /**
  * CLI for emdash-schema-i18n.
  *
- * Scaffolds and synchronizes admin localization strings from EmDash seeds and schemas.
+ * Scaffolds, synchronizes, and verifies admin localization strings from EmDash seeds and schemas.
  *
  * Usage:
  *   npx emdash-schema-i18n extract
  *   npx emdash-schema-i18n extract --clean-seed
- *   npx emdash-schema-i18n extract --locale=uk --seed=seed/seed.json --out=src/i18n/admin.ts
+ *   npx emdash-schema-i18n extract --locales=uk,de --seed=seed/seed.json --out=src/i18n/admin.ts
+ *   npx emdash-schema-i18n extract --check --locales=uk,de
  */
 
 import fs from "node:fs";
 import path from "node:path";
+import {
+	extractSeedStrings,
+	assertDictionaryCovers,
+} from "../src/localizer.mjs";
 
 const args = process.argv.slice(2);
 
@@ -20,37 +25,67 @@ if (args.includes("--help") || args.includes("-h")) {
 Usage: emdash-schema-i18n [command] [options]
 
 Commands:
-  extract              Scaffold/update translation dictionary from schema (default)
+  extract                Scaffold/update translation dictionary from schema (default)
 
 Options:
-  --seed=<path>        Path to seed file (default: seed/seed.json or .emdash/seed.json)
-  --out=<path>         Path to output TS/JS/JSON dictionary (default: src/i18n/admin.ts)
-  --locale=<code>      Target locale code to scaffold (default: uk)
-  --clean-seed         Remove bilingual slashes from the seed file, keeping English
-  -h, --help           Show help
+  --seed=<path>          Path to seed file (default: seed/seed.json or .emdash/seed.json)
+  --out=<path>           Path to output TS/JS/JSON dictionary (default: src/i18n/admin.ts)
+  --locale=<code>        Target locale code to scaffold (default: uk)
+  --locales=<c1,c2,...>  Comma-separated list of target locales (e.g. --locales uk,de)
+  --clean-seed           Remove bilingual slashes from the seed file, keeping English
+  --check                Verify that all seed strings are translated in the dictionary (CI mode)
+  -h, --help             Show help
 `);
 	process.exit(0);
 }
 
 const cwd = process.cwd();
 
-// Validate positional command and parse flags
 let seedPath = "";
 let outPath = "";
-let targetLocale = "uk";
+let localesRaw = "";
+let cleanSeed = false;
+let checkOnly = false;
 
-for (const arg of args) {
-	if (arg.startsWith("--seed=")) seedPath = path.resolve(cwd, arg.slice("--seed=".length));
-	else if (arg.startsWith("--out=")) outPath = path.resolve(cwd, arg.slice("--out=".length));
-	else if (arg.startsWith("--locale=")) targetLocale = arg.slice("--locale=".length).trim() || "uk";
-	else if (arg === "--clean-seed" || arg === "-h" || arg === "--help") continue;
-	else if (arg.startsWith("-")) {
+for (let i = 0; i < args.length; i++) {
+	const arg = args[i];
+	if (arg.startsWith("--seed=")) {
+		seedPath = path.resolve(cwd, arg.slice("--seed=".length));
+	} else if (arg === "--seed" && i + 1 < args.length) {
+		seedPath = path.resolve(cwd, args[++i]);
+	} else if (arg.startsWith("--out=")) {
+		outPath = path.resolve(cwd, arg.slice("--out=".length));
+	} else if (arg === "--out" && i + 1 < args.length) {
+		outPath = path.resolve(cwd, args[++i]);
+	} else if (arg.startsWith("--locales=")) {
+		localesRaw = arg.slice("--locales=".length).trim();
+	} else if (arg === "--locales" && i + 1 < args.length) {
+		localesRaw = args[++i].trim();
+	} else if (arg.startsWith("--locale=")) {
+		localesRaw = arg.slice("--locale=".length).trim();
+	} else if (arg === "--locale" && i + 1 < args.length) {
+		localesRaw = args[++i].trim();
+	} else if (arg === "--clean-seed") {
+		cleanSeed = true;
+	} else if (arg === "--check") {
+		checkOnly = true;
+	} else if (arg === "-h" || arg === "--help") {
+		continue;
+	} else if (arg.startsWith("-")) {
 		console.error(`Error: Unknown option "${arg}". Run with --help for usage.`);
 		process.exit(1);
 	} else if (arg !== "extract") {
 		console.error(`Error: Unknown command "${arg}". Supported commands: extract.`);
 		process.exit(1);
 	}
+}
+
+const targetLocales = (localesRaw ? localesRaw.split(",") : ["uk"])
+	.map((l) => l.trim())
+	.filter(Boolean);
+
+if (targetLocales.length === 0) {
+	targetLocales.push("uk");
 }
 
 if (!seedPath) {
@@ -65,8 +100,6 @@ if (!seedPath) {
 if (!outPath) {
 	outPath = path.join(cwd, "src", "i18n", "admin.ts");
 }
-
-const cleanSeed = args.includes("--clean-seed");
 
 if (!fs.existsSync(seedPath)) {
 	console.error(`Error: Seed file not found at ${seedPath}`);
@@ -100,7 +133,6 @@ function parseExistingDictionary(content, defaultTargetLocale) {
 	}
 
 	const result = {};
-	// Match locale blocks like `uk: { ... }` or `"uk": { ... }`
 	const blockRegex = /(?:^|[,{\s])(?:"([a-zA-Z0-9_-]+)"|([a-zA-Z0-9_-]+))\s*:\s*\{([^{}]*)\}/gm;
 	let foundBlocks = false;
 
@@ -141,13 +173,41 @@ let existingMultiLocaleDict = {};
 if (fs.existsSync(outPath)) {
 	try {
 		const existingContent = fs.readFileSync(outPath, "utf-8");
-		existingMultiLocaleDict = parseExistingDictionary(existingContent, targetLocale);
+		existingMultiLocaleDict = parseExistingDictionary(
+			existingContent,
+			targetLocales[0],
+		);
 	} catch (err) {
-		console.warn("Notice: Could not parse existing translation file, starting fresh:", err.message);
+		console.warn(
+			"Notice: Could not parse existing translation file, starting fresh:",
+			err.message,
+		);
+	}
+} else if (checkOnly) {
+	console.error(
+		`[emdash-schema-i18n] Error: Dictionary file not found at ${outPath}`,
+	);
+	process.exit(1);
+}
+
+// CI check mode: verify all seed strings have non-empty translations in targetLocales
+if (checkOnly) {
+	try {
+		const result = assertDictionaryCovers(
+			seed,
+			existingMultiLocaleDict,
+			targetLocales,
+		);
+		console.log(
+			`[emdash-schema-i18n] Dictionary check passed (${result.keys.length} strings covered across locales: ${result.locales.join(", ")}).`,
+		);
+		process.exit(0);
+	} catch (err) {
+		console.error(err.message || String(err));
+		process.exit(1);
 	}
 }
 
-const existingTranslations = existingMultiLocaleDict[targetLocale] || {};
 const knownExistingPhrases = new Set();
 for (const localeMap of Object.values(existingMultiLocaleDict)) {
 	if (localeMap && typeof localeMap === "object") {
@@ -156,162 +216,110 @@ for (const localeMap of Object.values(existingMultiLocaleDict)) {
 		}
 	}
 }
-const extracted = new Map();
 
-function processString(str, parentObj, key) {
-	if (typeof str !== "string" || !str.trim()) return str;
-	const trimmed = str.trim();
-
-	if (str.includes(" / ") && !knownExistingPhrases.has(trimmed)) {
-		const parts = str.split(" / ");
-		if (parts.length === 2) {
-			const firstPart = parts[0].trim();
-			const en = parts[1].trim();
-
-			if (!extracted.has(en) || !extracted.get(en)) {
-				extracted.set(en, existingTranslations[en] || firstPart);
-			}
-
-			if (cleanSeed && parentObj && key !== undefined) {
-				parentObj[key] = en;
-			}
-			return en;
-		}
-	}
-
-	if (!extracted.has(trimmed)) {
-		extracted.set(trimmed, existingTranslations[trimmed] || "");
-	}
-	return trimmed;
-}
-
-const TARGET_KEYS = new Set([
-	"label",
-	"labelSingular",
-	"description",
-	"category",
-	"group",
-	"placeholder",
-	"hint",
-]);
-
-function deepWalk(val, parentKey = "") {
-	if (!val) return;
-	if (Array.isArray(val)) {
-		for (let i = 0; i < val.length; i++) {
-			const item = val[i];
-			if (typeof item === "string" && (item.includes(" / ") || parentKey === "options")) {
-				val[i] = processString(item, val, i);
-			} else if (item && typeof item === "object") {
-				deepWalk(item, parentKey);
-			}
-		}
-	} else if (typeof val === "object") {
-		for (const [k, v] of Object.entries(val)) {
-			if (TARGET_KEYS.has(k) && typeof v === "string") {
-				processString(v, val, k);
-			} else if (typeof v === "object") {
-				deepWalk(v, k);
-			}
-		}
-	}
-}
-
-// 1. Process Block Types
-if (Array.isArray(seed.blockTypes)) {
-	deepWalk(seed.blockTypes);
-}
-
-// 2. Process Collections
-if (Array.isArray(seed.collections)) {
-	deepWalk(seed.collections);
-} else if (seed.collections && typeof seed.collections === "object") {
-	deepWalk(seed.collections);
-}
-
-// 3. Process Taxonomies (label and labelSingular on taxonomy definitions only)
-const taxonomyEntries = Array.isArray(seed.taxonomies)
-	? seed.taxonomies
-	: seed.taxonomies && typeof seed.taxonomies === "object"
-		? Object.values(seed.taxonomies)
-		: [];
-for (const tax of taxonomyEntries) {
-	if (tax && typeof tax === "object") {
-		if (typeof tax.label === "string") {
-			processString(tax.label, tax, "label");
-		}
-		if (typeof tax.labelSingular === "string") {
-			processString(tax.labelSingular, tax, "labelSingular");
-		}
-	}
-}
-
-// 4. Process Menus
-if (Array.isArray(seed.menus)) {
-	for (const menu of seed.menus) {
-		if (menu && typeof menu === "object" && typeof menu.name === "string") {
-			processString(menu.name, menu, "name");
-		}
-	}
-}
-
-// Preserve any custom/manual keys already present in targetLocale dictionary
-for (const [existingKey, existingVal] of Object.entries(existingTranslations)) {
-	if (!extracted.has(existingKey) && existingVal) {
-		extracted.set(existingKey, existingVal);
-	}
-}
+const { keys: extractedKeys, inlineTranslations } = extractSeedStrings(seed, {
+	cleanSeed,
+	knownPhrases: knownExistingPhrases,
+});
 
 // Save cleaned seed if requested
 if (cleanSeed) {
 	fs.writeFileSync(seedPath, JSON.stringify(seed, null, 2) + "\n", "utf-8");
-	console.log(`[emdash-schema-i18n] Cleaned seed file at ${seedPath} (removed bilingual slashes)`);
+	console.log(
+		`[emdash-schema-i18n] Cleaned seed file at ${seedPath} (removed bilingual slashes)`,
+	);
 }
 
-// Generate output file
-const sortedKeys = Array.from(extracted.keys()).sort((a, b) => a.localeCompare(b));
-let translatedCount = 0;
-let untranslatedCount = 0;
+// Build merged dictionary for all targetLocales (and preserve any other existing locales)
+const primaryInlineLocale = targetLocales.includes("uk")
+	? "uk"
+	: targetLocales[0];
 
-const dictLines = sortedKeys.map((enKey) => {
-	const localizedVal = extracted.get(enKey);
-	if (localizedVal) {
-		translatedCount++;
-		return `\t\t${JSON.stringify(enKey)}: ${JSON.stringify(localizedVal)},`;
-	} else {
-		untranslatedCount++;
-		return `\t\t${JSON.stringify(enKey)}: "", // TODO: translate`;
+/** @type {Record<string, Map<string, string>>} */
+const localeMaps = {};
+let totalTranslatedCount = 0;
+let totalUntranslatedCount = 0;
+
+for (const loc of targetLocales) {
+	const existingForLoc = existingMultiLocaleDict[loc] || {};
+	const map = new Map();
+
+	for (const enKey of extractedKeys) {
+		const existingVal = existingForLoc[enKey];
+		if (typeof existingVal === "string" && existingVal.length > 0) {
+			map.set(enKey, existingVal);
+		} else if (loc === primaryInlineLocale && inlineTranslations.has(enKey)) {
+			map.set(enKey, inlineTranslations.get(enKey) || "");
+		} else {
+			map.set(enKey, "");
+		}
 	}
-});
+
+	// Preserve any custom/manual keys already present in this locale's dictionary
+	for (const [existingKey, existingVal] of Object.entries(existingForLoc)) {
+		if (!map.has(existingKey) && existingVal) {
+			map.set(existingKey, existingVal);
+		}
+	}
+
+	localeMaps[loc] = map;
+}
 
 const isJson = outPath.endsWith(".json");
 let fileContent = "";
 
 if (isJson) {
-	const jsonObj = { ...existingMultiLocaleDict, [targetLocale]: {} };
-	for (const key of sortedKeys) {
-		jsonObj[targetLocale][key] = extracted.get(key) || "";
+	const jsonObj = { ...existingMultiLocaleDict };
+	for (const loc of targetLocales) {
+		const map = localeMaps[loc];
+		const sortedKeys = Array.from(map.keys()).sort((a, b) => a.localeCompare(b));
+		jsonObj[loc] = {};
+		for (const key of sortedKeys) {
+			const val = map.get(key) || "";
+			if (val) totalTranslatedCount++;
+			else totalUntranslatedCount++;
+			jsonObj[loc][key] = val;
+		}
 	}
 	fileContent = JSON.stringify(jsonObj, null, 2) + "\n";
 } else {
-	const otherLocaleBlocks = [];
+	const allBlocks = [];
+
+	for (const loc of targetLocales) {
+		const map = localeMaps[loc];
+		const sortedKeys = Array.from(map.keys()).sort((a, b) => a.localeCompare(b));
+		const dictLines = sortedKeys.map((enKey) => {
+			const localizedVal = map.get(enKey);
+			if (localizedVal) {
+				totalTranslatedCount++;
+				return `\t\t${JSON.stringify(enKey)}: ${JSON.stringify(localizedVal)},`;
+			}
+			totalUntranslatedCount++;
+			return `\t\t${JSON.stringify(enKey)}: "", // TODO: translate`;
+		});
+		const safeKey = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(loc)
+			? loc
+			: JSON.stringify(loc);
+		allBlocks.push(`\t${safeKey}: {\n${dictLines.join("\n")}\n\t},`);
+	}
+
+	// Preserve any other locale blocks that were already in the file but not in targetLocales
 	for (const [loc, entries] of Object.entries(existingMultiLocaleDict)) {
-		if (loc === targetLocale || !entries || typeof entries !== "object") continue;
+		if (
+			targetLocales.includes(loc) ||
+			!entries ||
+			typeof entries !== "object"
+		) {
+			continue;
+		}
 		const lines = Object.keys(entries)
 			.sort((a, b) => a.localeCompare(b))
 			.map((k) => `\t\t${JSON.stringify(k)}: ${JSON.stringify(entries[k])},`);
-		const safeLocKey = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(loc) ? loc : JSON.stringify(loc);
-		otherLocaleBlocks.push(`\t${safeLocKey}: {\n${lines.join("\n")}\n\t},`);
+		const safeLocKey = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(loc)
+			? loc
+			: JSON.stringify(loc);
+		allBlocks.push(`\t${safeLocKey}: {\n${lines.join("\n")}\n\t},`);
 	}
-
-	const safeTargetKey = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(targetLocale)
-		? targetLocale
-		: JSON.stringify(targetLocale);
-
-	const allBlocks = [
-		`\t${safeTargetKey}: {\n${dictLines.join("\n")}\n\t},`,
-		...otherLocaleBlocks,
-	];
 
 	fileContent = `// Generated and managed by emdash-schema-i18n CLI
 // Run "npx emdash-schema-i18n extract" after updating schema or block types.
@@ -328,11 +336,15 @@ export default adminDictionary;
 fs.mkdirSync(path.dirname(outPath), { recursive: true });
 fs.writeFileSync(outPath, fileContent, "utf-8");
 
-console.log(`[emdash-schema-i18n] Updated:      ${outPath} (locale: ${targetLocale})`);
-console.log(`[emdash-schema-i18n] Total strings: ${sortedKeys.length}`);
-console.log(`[emdash-schema-i18n] Translated:    ${translatedCount}`);
-if (untranslatedCount > 0) {
-	console.log(`[emdash-schema-i18n] Untranslated:  ${untranslatedCount} (marked with TODO)`);
+console.log(
+	`[emdash-schema-i18n] Updated:      ${outPath} (locales: ${targetLocales.join(", ")})`,
+);
+console.log(`[emdash-schema-i18n] Total strings: ${extractedKeys.length}`);
+console.log(`[emdash-schema-i18n] Translated:    ${totalTranslatedCount}`);
+if (totalUntranslatedCount > 0) {
+	console.log(
+		`[emdash-schema-i18n] Untranslated:  ${totalUntranslatedCount} (marked with TODO)`,
+	);
 } else {
 	console.log(`[emdash-schema-i18n] All strings are translated!`);
 }

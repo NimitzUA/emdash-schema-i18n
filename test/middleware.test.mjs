@@ -9,6 +9,9 @@ import * as taxonomiesNameRoute from "emdash/internal/routes/api/taxonomies/_nam
 import {
 	createLocalizationMiddleware,
 	withSchemaLocalization,
+	isJsonMimeType,
+	resolveSessionScope,
+	validateMiddlewareOptions,
 } from "../src/middleware.mjs";
 import { localizeString, TaxonomyTranslationCache } from "../src/localizer.mjs";
 
@@ -100,8 +103,6 @@ test("GET /_emdash/api/schema/block-types/<slug> is localized for single block t
 });
 
 test("English labels with ' / ' are not broken or mangled", () => {
-	// Even when dictionary only has `uk` (standard CLI output), an English source phrase
-	// containing ' / ' (like "Before / after") must NOT be split into "after" for 'en' locale!
 	const ukOnlyDict = {
 		uk: { "Before / after": "До / після" },
 	};
@@ -175,7 +176,8 @@ test("Vary header is merged and ETag/Content-Length are stripped on modified JSO
 	assert.match(vary, /Origin/i);
 	assert.match(vary, /X-Custom/i);
 	assert.match(vary, /Cookie/i);
-	assert.match(vary, /Accept-Language/i);
+	// useAcceptLanguage defaults to false, so Accept-Language is not added by default
+	assert.doesNotMatch(vary, /Accept-Language/i);
 
 	// ETag and Content-Length must be removed
 	assert.equal(response.headers.get("ETag"), null);
@@ -339,6 +341,7 @@ test("middleware skips JSON parsing if schema endpoint returns non-JSON content-
 
 test("HEAD requests to schema endpoints strip ETag/Content-Length and merge Vary header like GET", async () => {
 	const middleware = createLocalizationMiddleware({
+		useAcceptLanguage: true,
 		dictionary: { uk: { Articles: "Статті" } },
 	});
 
@@ -487,9 +490,8 @@ test("middleware returns original uncancelled response when localization throws 
 });
 
 test("Vary header only includes Cookie and Accept-Language when they participate in locale resolution", async () => {
-	// 1. useAcceptLanguage: false -> Vary has Cookie only (not Accept-Language)
+	// 1. Default (useAcceptLanguage: false, useCookie: true) -> Vary has Cookie only
 	const mwCookieOnly = createLocalizationMiddleware({
-		useAcceptLanguage: false,
 		dictionary: { uk: { Posts: "Записи" } },
 	});
 	const reqNoQuery = new Request("http://localhost:4321/_emdash/api/manifest", {
@@ -503,9 +505,10 @@ test("Vary header only includes Cookie and Accept-Language when they participate
 	});
 	assert.equal(resCookieOnly.headers.get("Vary"), "Cookie");
 
-	// 2. useCookie: false -> Vary has Accept-Language only (not Cookie)
+	// 2. useCookie: false, useAcceptLanguage: true -> Vary has Accept-Language only
 	const mwAcceptOnly = createLocalizationMiddleware({
 		useCookie: false,
+		useAcceptLanguage: true,
 		dictionary: { uk: { Posts: "Записи" } },
 	});
 	const resAcceptOnly = await mwAcceptOnly({ request: reqNoQuery }, async () => {
@@ -516,30 +519,32 @@ test("Vary header only includes Cookie and Accept-Language when they participate
 	});
 	assert.equal(resAcceptOnly.headers.get("Vary"), "Accept-Language");
 
-	// 3. URL with ?locale=uk (default priority) -> neither Cookie nor Accept-Language added to Vary
-	const mwDefault = createLocalizationMiddleware({
+	// 3. URL with ?locale=uk when allowQueryParam: true -> neither Cookie nor Accept-Language added to Vary
+	const mwQueryAllowed = createLocalizationMiddleware({
+		allowQueryParam: true,
 		dictionary: { uk: { Posts: "Записи" } },
 	});
 	const reqWithQuery = new Request("http://localhost:4321/_emdash/api/manifest?locale=uk");
-	const resWithQuery = await mwDefault({ request: reqWithQuery, url: new URL(reqWithQuery.url) }, async () => {
-		return new Response(JSON.stringify({ collections: { p: { label: "Posts" } } }), {
-			status: 200,
-			headers: { "Content-Type": "application/json" },
-		});
-	});
+	const resWithQuery = await mwQueryAllowed(
+		{ request: reqWithQuery, url: new URL(reqWithQuery.url) },
+		async () => {
+			return new Response(JSON.stringify({ collections: { p: { label: "Posts" } } }), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			});
+		},
+	);
 	assert.equal(resWithQuery.headers.get("Vary"), null);
 });
 
-test("GET /_emdash/api/taxonomies and /_emdash/api/taxonomies/[name] are localized for uk, original for en, and terms/translations are untouched", async () => {
-	const middleware = createLocalizationMiddleware({
-		dictionary: {
-			uk: {
-				"Project categories": "Категорії проєктів",
-				"Project category": "Категорія проєкту",
-				"taxonomies.industries.label": "Галузі (точкове перевизначення)",
-			},
+test("GET /_emdash/api/taxonomies and /_emdash/api/taxonomies/[name] are opt-in (localizeTaxonomies: false by default) and work with localizeManifestTaxonomies", async () => {
+	const dictionary = {
+		uk: {
+			"Project categories": "Категорії проєктів",
+			"Project category": "Категорія проєкту",
+			"taxonomies.industries.label": "Галузі (точкове перевизначення)",
 		},
-	});
+	};
 
 	const listPayload = {
 		success: true,
@@ -563,10 +568,62 @@ test("GET /_emdash/api/taxonomies and /_emdash/api/taxonomies/[name] are localiz
 		},
 	};
 
-	// 1. GET /_emdash/api/taxonomies in uk -> localized
 	const reqListUk = new Request("http://localhost:4321/_emdash/api/taxonomies", {
 		headers: { Cookie: "emdash-locale=uk" },
 	});
+
+	// 0. Default (localizeTaxonomies: false) leaves /_emdash/api/taxonomies and manifest.taxonomies untouched
+	const mwDefault = createLocalizationMiddleware({ dictionary });
+	const resDefaultTax = await mwDefault(createContext({ request: reqListUk }), async () => {
+		return new Response(JSON.stringify(listPayload), {
+			status: 200,
+			headers: { "Content-Type": "application/json" },
+		});
+	});
+	const dataDefaultTax = await resDefaultTax.json();
+	assert.equal(dataDefaultTax.data.taxonomies[0].label, "Project categories");
+
+	const reqManifestUk = new Request("http://localhost:4321/_emdash/api/manifest", {
+		headers: { Cookie: "emdash-locale=uk" },
+	});
+	const manifestWithTax = {
+		collections: {},
+		taxonomies: [{ name: "project_categories", label: "Project categories" }],
+	};
+	const resDefaultManifest = await mwDefault(
+		createContext({ request: reqManifestUk }),
+		async () =>
+			new Response(JSON.stringify(manifestWithTax), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			}),
+	);
+	const dataDefaultManifest = await resDefaultManifest.json();
+	assert.equal(dataDefaultManifest.taxonomies[0].label, "Project categories");
+
+	// Independent localizeManifestTaxonomies: true localizes manifest.taxonomies even when localizeTaxonomies: false
+	const mwManifestTaxOnly = createLocalizationMiddleware({
+		dictionary,
+		localizeTaxonomies: false,
+		localizeManifestTaxonomies: true,
+	});
+	const resManifestTaxOnly = await mwManifestTaxOnly(
+		createContext({ request: reqManifestUk }),
+		async () =>
+			new Response(JSON.stringify(manifestWithTax), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			}),
+	);
+	const dataManifestTaxOnly = await resManifestTaxOnly.json();
+	assert.equal(dataManifestTaxOnly.taxonomies[0].label, "Категорії проєктів");
+
+	// 1. With localizeTaxonomies: true, GET /_emdash/api/taxonomies in uk -> localized
+	const middleware = createLocalizationMiddleware({
+		dictionary,
+		localizeTaxonomies: true,
+	});
+
 	const resListUk = await middleware(createContext({ request: reqListUk }), async () => {
 		return new Response(JSON.stringify(listPayload), {
 			status: 200,
@@ -651,24 +708,6 @@ test("GET /_emdash/api/taxonomies and /_emdash/api/taxonomies/[name] are localiz
 		const dataTerms = await resTerms.json();
 		assert.equal(dataTerms.data.items[0].label, "Project categories");
 	}
-
-	// 5. Explicit localizeTaxonomies: false skips taxonomy definition localization
-	const mwDisabled = createLocalizationMiddleware({
-		localizeTaxonomies: false,
-		dictionary: {
-			uk: {
-				"Project categories": "Категорії проєктів",
-			},
-		},
-	});
-	const resDisabled = await mwDisabled(createContext({ request: reqSingleUk }), async () => {
-		return new Response(JSON.stringify(singlePayload), {
-			status: 200,
-			headers: { "Content-Type": "application/json" },
-		});
-	});
-	const dataDisabled = await resDisabled.json();
-	assert.equal(dataDisabled.data.taxonomy.label, "Project categories");
 });
 
 test("Real Astro context + EmDash SQLite DB: taxonomy GET/POST/PUT/DELETE with restoreTaxonomyLabelsOnWrite", async () => {
@@ -699,6 +738,7 @@ test("Real Astro context + EmDash SQLite DB: taxonomy GET/POST/PUT/DELETE with r
 	try {
 		const middleware = createLocalizationMiddleware({
 			dictionary,
+			localizeTaxonomies: true,
 			restoreTaxonomyLabelsOnWrite: true,
 		});
 
@@ -746,8 +786,12 @@ test("Real Astro context + EmDash SQLite DB: taxonomy GET/POST/PUT/DELETE with r
 		const postUkData = await postUkRes.json();
 		assert.equal(postUkData.data.taxonomy.label, "Початкові категорії");
 
-		// Verify default middleware (restoreTaxonomyLabelsOnWrite: false) localizes GET but does NOT touch PUT body
-		const defaultMiddleware = createLocalizationMiddleware({ dictionary });
+		// Verify middleware with localizeTaxonomies: true and restoreTaxonomyLabelsOnWrite: false
+		// localizes GET but does NOT touch PUT body
+		const readOnlyTaxMiddleware = createLocalizationMiddleware({
+			dictionary,
+			localizeTaxonomies: true,
+		});
 		const getDefReq = new Request(
 			"http://localhost:4321/_emdash/api/taxonomies/project_categories",
 			{
@@ -760,7 +804,7 @@ test("Real Astro context + EmDash SQLite DB: taxonomy GET/POST/PUT/DELETE with r
 			params: { name: "project_categories" },
 			locals,
 		});
-		const getDefRes = await defaultMiddleware(getDefCtx, () =>
+		const getDefRes = await readOnlyTaxMiddleware(getDefCtx, () =>
 			taxonomiesNameRoute.GET(getDefCtx),
 		);
 		const getDefData = await getDefRes.json();
@@ -782,15 +826,15 @@ test("Real Astro context + EmDash SQLite DB: taxonomy GET/POST/PUT/DELETE with r
 			params: { name: "project_categories" },
 			locals,
 		});
-		let bodySeenByDefaultMw = null;
-		await defaultMiddleware(putNoRestoreCtx, async () => {
-			bodySeenByDefaultMw = await putNoRestoreCtx.request.clone().json();
+		let bodySeenByReadOnlyMw = null;
+		await readOnlyTaxMiddleware(putNoRestoreCtx, async () => {
+			bodySeenByReadOnlyMw = await putNoRestoreCtx.request.clone().json();
 			return new Response(JSON.stringify({ success: true }), {
 				status: 200,
 				headers: { "Content-Type": "application/json" },
 			});
 		});
-		assert.equal(bodySeenByDefaultMw.label, "Категорії проєктів");
+		assert.equal(bodySeenByReadOnlyMw.label, "Категорії проєктів");
 
 		// 2. GET /_emdash/api/taxonomies/project_categories without ?locale= (reads `en` row, translates to `uk` via Cookie)
 		const getReq = new Request(
@@ -990,7 +1034,7 @@ test("Real Astro context + EmDash SQLite DB: taxonomy GET/POST/PUT/DELETE with r
 	}
 });
 
-test("TaxonomyTranslationCache enforces bounded size and TTL expiration", () => {
+test("TaxonomyTranslationCache enforces bounded size, TTL expiration, and sessionScope isolation", () => {
 	let currentTime = 1_000;
 	const cache = new TaxonomyTranslationCache({
 		maxSize: 2,
@@ -998,26 +1042,267 @@ test("TaxonomyTranslationCache enforces bounded size and TTL expiration", () => 
 		now: () => currentTime,
 	});
 
-	cache.set("tax_a", "en", "label", "Таксономія А", "Taxonomy A");
-	cache.set("tax_b", "en", "label", "Таксономія Б", "Taxonomy B");
+	cache.set("tax_a", "en", "label", "Таксономія А", "Taxonomy A", "user:1");
+	cache.set("tax_b", "en", "label", "Таксономія Б", "Taxonomy B", "user:1");
 	assert.equal(cache.size, 2);
 
+	// Different sessionScope does not match "user:1"
+	assert.equal(
+		cache.getOriginal("tax_b", "en", "label", "Таксономія Б", "user:2"),
+		undefined,
+	);
+	assert.equal(
+		cache.getOriginal("tax_b", "en", "label", "Таксономія Б", "user:1"),
+		"Taxonomy B",
+	);
+
 	// Adding a 3rd entry evicts the oldest ("tax_a")
-	cache.set("tax_c", "en", "label", "Таксономія В", "Taxonomy C");
+	cache.set("tax_c", "en", "label", "Таксономія В", "Taxonomy C", "user:1");
 	assert.equal(cache.size, 2);
-	assert.equal(cache.getOriginal("tax_a", "en", "label", "Таксономія А"), undefined);
-	assert.equal(cache.getOriginal("tax_b", "en", "label", "Таксономія Б"), "Taxonomy B");
-	assert.equal(cache.getOriginal("tax_c", "en", "label", "Таксономія В"), "Taxonomy C");
+	assert.equal(cache.getOriginal("tax_a", "en", "label", "Таксономія А", "user:1"), undefined);
+	assert.equal(cache.getOriginal("tax_b", "en", "label", "Таксономія Б", "user:1"), "Taxonomy B");
+	assert.equal(cache.getOriginal("tax_c", "en", "label", "Таксономія В", "user:1"), "Taxonomy C");
 
 	// Advance clock past TTL -> entries expire
 	currentTime += 6_000;
-	assert.equal(cache.getOriginal("tax_b", "en", "label", "Таксономія Б"), undefined);
-	assert.equal(cache.getOriginal("tax_c", "en", "label", "Таксономія В"), undefined);
+	assert.equal(cache.getOriginal("tax_b", "en", "label", "Таксономія Б", "user:1"), undefined);
+	assert.equal(cache.getOriginal("tax_c", "en", "label", "Таксономія В", "user:1"), undefined);
 	assert.equal(cache.size, 0);
 });
 
+test("Hardened PUT/PATCH restoration: safe cancel order, maxRestoreBodyBytes, strict MIME, locale conflict, and session isolation", async () => {
+	// 1. Strict MIME check (isJsonMimeType)
+	assert.equal(isJsonMimeType("application/json"), true);
+	assert.equal(isJsonMimeType("application/json; charset=utf-8"), true);
+	assert.equal(isJsonMimeType("application/ld+json"), true);
+	assert.equal(isJsonMimeType("application/vnd.api+json; charset=utf-8"), true);
+	assert.equal(isJsonMimeType("text/plain; note=application/json"), false);
+	assert.equal(isJsonMimeType("application/jsonp"), false);
+	assert.equal(isJsonMimeType("text/json"), false);
 
+	const dictionary = {
+		uk: {
+			"Project categories": "Категорії проєктів",
+		},
+	};
 
+	const middleware = createLocalizationMiddleware({
+		dictionary,
+		localizeTaxonomies: true,
+		restoreTaxonomyLabelsOnWrite: true,
+		maxRestoreBodyBytes: 256,
+	});
 
+	// Seed cache for Editor A (`user:editor-a`) via GET
+	const getReqA = new Request(
+		"http://localhost:4321/_emdash/api/taxonomies/project_categories",
+		{
+			headers: { Cookie: "emdash-locale=uk" },
+		},
+	);
+	await middleware(
+		{
+			request: getReqA,
+			url: new URL(getReqA.url),
+			locals: { user: { id: "editor-a" } },
+		},
+		async () =>
+			new Response(
+				JSON.stringify({
+					data: {
+						taxonomy: {
+							name: "project_categories",
+							locale: "en",
+							label: "Project categories",
+						},
+					},
+				}),
+				{ status: 200, headers: { "Content-Type": "application/json" } },
+			),
+	);
 
+	// 2. Session isolation: Editor B (`user:editor-b`) sending PUT does NOT trigger Editor A's cached restoration
+	const putReqB = new Request(
+		"http://localhost:4321/_emdash/api/taxonomies/project_categories",
+		{
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ label: "Категорії проєктів" }),
+		},
+	);
+	const ctxB = {
+		request: putReqB,
+		url: new URL(putReqB.url),
+		locals: { user: { id: "editor-b" } },
+	};
+	await middleware(ctxB, async () => new Response("ok"));
+	const bodyB = await ctxB.request.json();
+	assert.equal(bodyB.label, "Категорії проєктів");
 
+	// 3. Conflicting ?locale=uk and body.locale="en" skips restoration
+	const putConflict = new Request(
+		"http://localhost:4321/_emdash/api/taxonomies/project_categories?locale=uk",
+		{
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ locale: "en", label: "Категорії проєктів" }),
+		},
+	);
+	const ctxConflict = {
+		request: putConflict,
+		url: new URL(putConflict.url),
+		locals: { user: { id: "editor-a" } },
+	};
+	await middleware(ctxConflict, async () => new Response("ok"));
+	const bodyConflict = await ctxConflict.request.json();
+	assert.equal(bodyConflict.label, "Категорії проєктів");
+
+	// 4. Non-JSON Content-Type (e.g. text/plain; note=json) skips restoration
+	const putBadMime = new Request(
+		"http://localhost:4321/_emdash/api/taxonomies/project_categories",
+		{
+			method: "PUT",
+			headers: { "Content-Type": "text/plain; note=json" },
+			body: JSON.stringify({ label: "Категорії проєктів" }),
+		},
+	);
+	const ctxBadMime = {
+		request: putBadMime,
+		url: new URL(putBadMime.url),
+		locals: { user: { id: "editor-a" } },
+	};
+	await middleware(ctxBadMime, async () => new Response("ok"));
+	const bodyBadMime = JSON.parse(await ctxBadMime.request.text());
+	assert.equal(bodyBadMime.label, "Категорії проєктів");
+
+	// 5. Oversized body (> maxRestoreBodyBytes = 256) skips restoration and leaves original body intact
+	const oversizedPayload = JSON.stringify({
+		label: "Категорії проєктів",
+		padding: "x".repeat(400),
+	});
+	const putOversized = new Request(
+		"http://localhost:4321/_emdash/api/taxonomies/project_categories",
+		{
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: oversizedPayload,
+		},
+	);
+	const ctxOversized = {
+		request: putOversized,
+		url: new URL(putOversized.url),
+		locals: { user: { id: "editor-a" } },
+	};
+	await middleware(ctxOversized, async () => new Response("ok"));
+	const bodyOversized = await ctxOversized.request.json();
+	assert.equal(bodyOversized.label, "Категорії проєктів");
+
+	// 6. Safe cancel order: if assigning context.request throws (frozen context with non-configurable request),
+	// originalRequest.body is NOT cancelled and remains readable in next()!
+	const putFrozen = new Request(
+		"http://localhost:4321/_emdash/api/taxonomies/project_categories",
+		{
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ label: "Категорії проєктів" }),
+		},
+	);
+	const frozenCtx = {};
+	Object.defineProperty(frozenCtx, "request", {
+		value: putFrozen,
+		writable: false,
+		configurable: false,
+		enumerable: true,
+	});
+	Object.defineProperty(frozenCtx, "url", {
+		value: new URL(putFrozen.url),
+		writable: false,
+		configurable: false,
+	});
+	Object.defineProperty(frozenCtx, "locals", {
+		value: { user: { id: "editor-a" } },
+		writable: false,
+		configurable: false,
+	});
+	Object.freeze(frozenCtx);
+
+	let bodyReadInNextAfterFrozenFailure = null;
+	await middleware(frozenCtx, async () => {
+		bodyReadInNextAfterFrozenFailure = await frozenCtx.request.json();
+		return new Response("ok");
+	});
+	assert.deepEqual(bodyReadInNextAfterFrozenFailure, { label: "Категорії проєктів" });
+
+	// 7. Editor A's normal PUT with application/vnd.api+json succeeds and restores original label
+	const putValidA = new Request(
+		"http://localhost:4321/_emdash/api/taxonomies/project_categories",
+		{
+			method: "PUT",
+			headers: { "Content-Type": "application/vnd.api+json" },
+			body: JSON.stringify({ label: "Категорії проєктів" }),
+		},
+	);
+	const ctxValidA = {
+		request: putValidA,
+		url: new URL(putValidA.url),
+		locals: { user: { id: "editor-a" } },
+	};
+	await middleware(ctxValidA, async () => new Response("ok"));
+	const bodyValidA = await ctxValidA.request.json();
+	assert.equal(bodyValidA.label, "Project categories");
+});
+
+test("validateMiddlewareOptions warns on unknown keys (typos) and invalid option value types", () => {
+	const capturedWarnings = [];
+	const prevWarn = console.warn;
+	console.warn = (...args) => {
+		capturedWarnings.push(args.join(" "));
+	};
+
+	try {
+		const warnings = validateMiddlewareOptions({
+			localiseTaxonomies: true, // British spelling typo
+			localizeTaxonomies: "true", // Wrong type (string instead of boolean)
+			maxRestoreBodyBytes: -10, // Wrong value (negative number)
+		});
+
+		assert.equal(warnings.length, 3);
+		assert.equal(capturedWarnings.length, 3);
+		assert.ok(warnings[0].includes('Unknown option "localiseTaxonomies"'));
+		assert.ok(warnings[1].includes('Invalid value for option "localizeTaxonomies"'));
+		assert.ok(warnings[2].includes('Invalid value for option "maxRestoreBodyBytes"'));
+	} finally {
+		console.warn = prevWarn;
+	}
+});
+
+test("resolveSessionScope extracts user id, authorization header, or session cookies", () => {
+	assert.equal(
+		resolveSessionScope({ locals: { user: { id: "u-42" } } }),
+		"user:u-42",
+	);
+	assert.equal(
+		resolveSessionScope({
+			request: new Request("http://localhost/", {
+				headers: { Authorization: "Bearer tok_123" },
+			}),
+		}),
+		"auth:Bearer tok_123",
+	);
+	assert.equal(
+		resolveSessionScope({
+			request: new Request("http://localhost/", {
+				headers: { Cookie: "emdash-locale=uk; emdash-session=sess_xyz" },
+			}),
+		}),
+		"cookie:emdash-session=sess_xyz",
+	);
+	assert.equal(
+		resolveSessionScope({
+			request: new Request("http://localhost/", {
+				headers: { Cookie: "emdash-locale=uk" },
+			}),
+		}),
+		"anon",
+	);
+});

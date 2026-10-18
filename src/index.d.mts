@@ -16,6 +16,8 @@ export {
 	TaxonomyTranslationCache,
 	recordTaxonomyTranslations,
 	restoreOriginalTaxonomyInput,
+	extractSeedStrings,
+	assertDictionaryCovers,
 } from "./localizer.mjs";
 
 export interface SchemaI18nOptions
@@ -24,16 +26,30 @@ export interface SchemaI18nOptions
 	excludeSchemaEditor?: boolean;
 	localizeSchemaCollections?: boolean;
 	localizeTaxonomies?: boolean;
+	localizeManifestTaxonomies?: boolean;
 	restoreTaxonomyLabelsOnWrite?: boolean;
+	maxRestoreBodyBytes?: number;
 	taxonomyCacheMaxSize?: number;
 	taxonomyCacheTtlMs?: number;
 	injectHtmlWatcher?: boolean;
 	autoReloadOnLocaleChange?: boolean;
+	now?: () => number;
 }
 
 export type CustomLocalizationOptions = SchemaI18nOptions;
 
 export declare const RELOAD_WATCHER_SCRIPT: string;
+export declare const DEFAULT_MAX_RESTORE_BODY_BYTES: number;
+
+export declare function isJsonMimeType(
+	contentType: string | null | undefined,
+): boolean;
+
+export declare function resolveSessionScope(context: any): string;
+
+export declare function validateMiddlewareOptions(
+	options: unknown,
+): string[];
 
 export declare function schemaLocalization(): PluginDescriptor;
 

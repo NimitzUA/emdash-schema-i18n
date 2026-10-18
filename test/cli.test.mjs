@@ -14,6 +14,8 @@ test("CLI --help displays usage", async () => {
 	assert.ok(stdout.includes("Usage: emdash-schema-i18n"));
 	assert.ok(stdout.includes("extract"));
 	assert.ok(stdout.includes("--clean-seed"));
+	assert.ok(stdout.includes("--locales"));
+	assert.ok(stdout.includes("--check"));
 });
 
 test("CLI errors gracefully if seed file is missing", async () => {
@@ -256,7 +258,7 @@ test("CLI extract handles escaped characters without double-escaping and extract
 	fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-test("CLI extract supports --locale flag and preserves other existing locales in admin.ts", async () => {
+test("CLI extract supports --locale and --locales uk,de flags and scaffolds all requested locales", async () => {
 	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "emdash-cli-test-"));
 	const seedPath = path.join(tmpDir, "seed.json");
 	const outTsPath = path.join(tmpDir, "admin.ts");
@@ -290,24 +292,109 @@ test("CLI extract supports --locale flag and preserves other existing locales in
 `;
 	fs.writeFileSync(outTsPath, initialTs, "utf-8");
 
+	// Scaffold both uk and de via `--locales uk,de` while preserving existing `pl`
 	await execFileAsync("node", [
 		cliPath,
 		"extract",
-		"--locale=pl",
+		"--locales",
+		"uk,de",
 		`--seed=${seedPath}`,
 		`--out=${outTsPath}`,
 	]);
 
 	const updatedTs = fs.readFileSync(outTsPath, "utf-8");
-	assert.ok(updatedTs.includes("pl: {"));
-	assert.ok(updatedTs.includes('"Articles": "Artykuły"'));
-	assert.ok(updatedTs.includes('"Content": ""'));
-	assert.ok(updatedTs.includes('"Tags": ""'));
-	assert.ok(updatedTs.includes('"Tag": ""'));
-	assert.ok(!updatedTs.includes('"Ignored taxonomy description"'));
-	// Ukrainian locale block must still be preserved
 	assert.ok(updatedTs.includes("uk: {"));
+	assert.ok(updatedTs.includes("de: {"));
+	assert.ok(updatedTs.includes("pl: {"));
 	assert.ok(updatedTs.includes('"Articles": "Статті"'));
+	assert.ok(updatedTs.includes('"Articles": "Artykuły"'));
+	assert.ok(!updatedTs.includes('"Ignored taxonomy description"'));
+
+	// Verify both uk and de blocks have all 4 keys ("Articles", "Content", "Tag", "Tags")
+	const deBlockMatch = updatedTs.match(/de:\s*\{([^{}]*)\}/m);
+	assert.ok(deBlockMatch);
+	assert.ok(deBlockMatch[1].includes('"Articles": "", // TODO: translate'));
+	assert.ok(deBlockMatch[1].includes('"Content": "", // TODO: translate'));
+	assert.ok(deBlockMatch[1].includes('"Tag": "", // TODO: translate'));
+	assert.ok(deBlockMatch[1].includes('"Tags": "", // TODO: translate'));
+
+	fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test("CLI extract --check exits with 1 when translations are missing and 0 when complete", async () => {
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "emdash-cli-test-"));
+	const seedPath = path.join(tmpDir, "seed.json");
+	const outTsPath = path.join(tmpDir, "admin.ts");
+
+	const seed = {
+		collections: [
+			{
+				label: "Projects",
+				labelSingular: "Project",
+			},
+		],
+		taxonomies: [
+			{
+				name: "categories",
+				label: "Categories",
+			},
+		],
+	};
+	fs.writeFileSync(seedPath, JSON.stringify(seed, null, 2), "utf-8");
+
+	// 1. Run extract --locales=uk,de (scaffolds empty strings)
+	await execFileAsync("node", [
+		cliPath,
+		"extract",
+		"--locales=uk,de",
+		`--seed=${seedPath}`,
+		`--out=${outTsPath}`,
+	]);
+
+	// 2. Run --check -> fails with exit code 1 because strings are empty
+	await assert.rejects(
+		execFileAsync("node", [
+			cliPath,
+			"extract",
+			"--check",
+			"--locales=uk,de",
+			`--seed=${seedPath}`,
+			`--out=${outTsPath}`,
+		]),
+		(err) => {
+			assert.equal(err.code, 1);
+			assert.ok(err.stderr.includes("[uk] (3 missing)"));
+			assert.ok(err.stderr.includes("[de] (3 missing)"));
+			return true;
+		},
+	);
+
+	// 3. Populate all translations for uk and de
+	const fullDictTs = `export const adminDictionary = {
+	uk: {
+		"Categories": "Категорії",
+		"Project": "Проєкт",
+		"Projects": "Проєкти",
+	},
+	de: {
+		"Categories": "Kategorien",
+		"Project": "Projekt",
+		"Projects": "Projekte",
+	},
+};
+`;
+	fs.writeFileSync(outTsPath, fullDictTs, "utf-8");
+
+	// 4. Run --check -> passes with exit code 0!
+	const { stdout } = await execFileAsync("node", [
+		cliPath,
+		"extract",
+		"--check",
+		"--locales=uk,de",
+		`--seed=${seedPath}`,
+		`--out=${outTsPath}`,
+	]);
+	assert.ok(stdout.includes("Dictionary check passed"));
 
 	fs.rmSync(tmpDir, { recursive: true, force: true });
 });
@@ -373,6 +460,3 @@ test("CLI extract --clean-seed preserves canonical English phrases with slashes 
 
 	fs.rmSync(tmpDir, { recursive: true, force: true });
 });
-
-
-
