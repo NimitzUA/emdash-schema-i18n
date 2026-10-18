@@ -1071,11 +1071,14 @@ test("TaxonomyTranslationCache enforces bounded size, TTL expiration, and sessio
 });
 
 test("Hardened PUT/PATCH restoration: safe cancel order, maxRestoreBodyBytes, strict MIME, locale conflict, and session isolation", async () => {
-	// 1. Strict MIME check (isJsonMimeType)
+	// 1. Strict MIME check (isJsonMimeType, RFC 6838 restricted-name syntax)
 	assert.equal(isJsonMimeType("application/json"), true);
 	assert.equal(isJsonMimeType("application/json; charset=utf-8"), true);
 	assert.equal(isJsonMimeType("application/ld+json"), true);
 	assert.equal(isJsonMimeType("application/vnd.api+json; charset=utf-8"), true);
+	assert.equal(isJsonMimeType("application/x/+json"), false);
+	assert.equal(isJsonMimeType("text/json+evil"), false);
+	assert.equal(isJsonMimeType("application/json, text/html"), false);
 	assert.equal(isJsonMimeType("text/plain; note=application/json"), false);
 	assert.equal(isJsonMimeType("application/jsonp"), false);
 	assert.equal(isJsonMimeType("text/json"), false);
@@ -1306,3 +1309,68 @@ test("resolveSessionScope extracts user id, authorization header, or session coo
 		"anon",
 	);
 });
+
+test("createLocalizationMiddleware warns once on the first manifest when dictionary keys match plain-string option values or menu.name", async () => {
+	const middleware = createLocalizationMiddleware({
+		dictionary: {
+			uk: {
+				private: "приватний",
+				primary: "основне",
+				Articles: "Статті",
+			},
+		},
+	});
+
+	const manifestPayload = {
+		collections: {
+			articles: {
+				label: "Articles",
+				fields: {
+					visibility: {
+						label: "Visibility",
+						options: ["public", "private"],
+					},
+				},
+			},
+		},
+		menus: [{ slug: "main", name: "primary" }],
+	};
+
+	const captured = [];
+	const prevWarn = console.warn;
+	console.warn = (...args) => captured.push(args.join(" "));
+	try {
+		const req1 = new Request("http://localhost:4321/_emdash/api/manifest", {
+			headers: { Cookie: "emdash-locale=uk" },
+		});
+		const res1 = await middleware(
+			{ request: req1, url: new URL(req1.url) },
+			async () =>
+				new Response(JSON.stringify(manifestPayload), {
+					status: 200,
+					headers: { "Content-Type": "application/json" },
+				}),
+		);
+		const body1 = await res1.json();
+		assert.deepEqual(body1.collections.articles.fields.visibility.options, ["public", "private"]);
+		assert.equal(body1.menus[0].name, "primary");
+		assert.equal(captured.length, 2);
+
+		// Second request to /_emdash/api/manifest should NOT re-warn
+		const req2 = new Request("http://localhost:4321/_emdash/api/manifest", {
+			headers: { Cookie: "emdash-locale=uk" },
+		});
+		await middleware(
+			{ request: req2, url: new URL(req2.url) },
+			async () =>
+				new Response(JSON.stringify(manifestPayload), {
+					status: 200,
+					headers: { "Content-Type": "application/json" },
+				}),
+		);
+		assert.equal(captured.length, 2);
+	} finally {
+		console.warn = prevWarn;
+	}
+});
+

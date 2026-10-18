@@ -17,6 +17,7 @@ export {
 	recordTaxonomyTranslations,
 	restoreOriginalTaxonomyInput,
 	extractSeedStrings,
+	warnOnIdentifierDictionaryKeys,
 	assertDictionaryCovers,
 } from "./localizer.mjs";
 

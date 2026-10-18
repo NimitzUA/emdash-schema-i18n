@@ -139,6 +139,12 @@ export declare function extractSeedStrings(
 	inlineTranslations: Map<string, string>;
 };
 
+export declare function warnOnIdentifierDictionaryKeys(
+	schema: any,
+	dictionary: Record<string, Record<string, string>> | undefined,
+	warnedKeys?: Set<string>,
+): string[];
+
 export declare function assertDictionaryCovers(
 	seed: any,
 	dictionary: Record<string, Record<string, string>>,

@@ -210,7 +210,7 @@ export const adminDictionary = {
 	fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-test("CLI extract handles escaped characters without double-escaping and extracts menus and string options", async () => {
+test("CLI extract handles escaped characters without double-escaping and ignores plain-string options and menu.name", async () => {
 	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "emdash-cli-test-"));
 	const seedPath = path.join(tmpDir, "seed.json");
 	const outTsPath = path.join(tmpDir, "admin.ts");
@@ -223,7 +223,15 @@ test("CLI extract handles escaped characters without double-escaping and extract
 					{
 						slug: "status",
 						label: "Status",
-						options: ["Draft", "Published"],
+						options: ["draft", "published"],
+					},
+					{
+						slug: "fit",
+						label: "Image Fit",
+						options: [
+							{ value: "cover", label: "Cover" },
+							{ value: "contain", label: "Contain" },
+						],
 					},
 				],
 			},
@@ -231,7 +239,8 @@ test("CLI extract handles escaped characters without double-escaping and extract
 		menus: [
 			{
 				slug: "main",
-				name: "Головне меню / Main Menu",
+				name: "primary",
+				label: "Головне меню / Main Menu",
 			},
 		],
 	};
@@ -252,8 +261,12 @@ test("CLI extract handles escaped characters without double-escaping and extract
 	const updatedTs = fs.readFileSync(outTsPath, "utf-8");
 	assert.ok(updatedTs.includes('"Articles": "Статті з \\"лапками\\"\\nі переносом"'));
 	assert.ok(updatedTs.includes('"Main Menu": "Головне меню"'));
-	assert.ok(updatedTs.includes('"Draft": ""'));
-	assert.ok(updatedTs.includes('"Published": ""'));
+	assert.ok(updatedTs.includes('"Cover": ""'));
+	assert.ok(updatedTs.includes('"Contain": ""'));
+	// Plain-string option values and menu.name must NOT be extracted
+	assert.ok(!updatedTs.includes('"draft"'));
+	assert.ok(!updatedTs.includes('"published"'));
+	assert.ok(!updatedTs.includes('"primary"'));
 
 	fs.rmSync(tmpDir, { recursive: true, force: true });
 });

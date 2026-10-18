@@ -8,12 +8,16 @@ import {
 	TaxonomyTranslationCache,
 	recordTaxonomyTranslations,
 	restoreOriginalTaxonomyInput,
+	warnOnIdentifierDictionaryKeys,
 	installLocaleReloadWatcher,
 } from "./localizer.mjs";
 
 export const RELOAD_WATCHER_SCRIPT = `<script id="emdash-i18n-watcher">\n(${installLocaleReloadWatcher.toString()})();\n</script>`;
 
 export const DEFAULT_MAX_RESTORE_BODY_BYTES = 64 * 1024;
+
+const RFC6838_MIME_REGEX =
+	/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/;
 
 /**
  * Strictly checks whether a Content-Type header represents JSON (`application/json` or `*+json`).
@@ -24,9 +28,8 @@ export const DEFAULT_MAX_RESTORE_BODY_BYTES = 64 * 1024;
 export function isJsonMimeType(contentType) {
 	if (typeof contentType !== "string" || !contentType.trim()) return false;
 	const mime = contentType.split(";", 1)[0].trim().toLowerCase();
-	if (!mime.includes("/")) return false;
-	if (mime === "application/json") return true;
-	return /^[a-z0-9!#$&-^_]+\/[a-z0-9!#$&-^_.+]+\+json$/.test(mime);
+	if (!RFC6838_MIME_REGEX.test(mime)) return false;
+	return mime === "application/json" || mime.endsWith("+json");
 }
 
 /**
@@ -458,6 +461,9 @@ export function createLocalizationMiddleware(options = {}) {
 			})
 		: null;
 
+	let manifestIdentifiersChecked = false;
+	const warnedIdentifierKeys = new Set();
+
 	return async function localizationMiddleware(context, next) {
 		const method = context.request?.method || "GET";
 		const pathname = resolvePathname(context);
@@ -644,6 +650,14 @@ export function createLocalizationMiddleware(options = {}) {
 					let localized = data;
 
 					if (isManifest) {
+						if (!manifestIdentifiersChecked) {
+							manifestIdentifiersChecked = true;
+							warnOnIdentifierDictionaryKeys(
+								data,
+								safeOpts.dictionary,
+								warnedIdentifierKeys,
+							);
+						}
 						localized = localizeManifest(data, locale, effectiveOptions);
 					} else if (isBlockTypes) {
 						localized = localizeBlockTypesResponse(data, locale, effectiveOptions);

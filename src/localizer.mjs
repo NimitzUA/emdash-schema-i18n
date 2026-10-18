@@ -346,7 +346,9 @@ function localizeFieldsCollection(fields, parentKey, locale, options) {
 }
 
 /**
- * Localizes an array of select/multiSelect options (strings or `{ value, label }` objects).
+ * Localizes an array of select/multiSelect options.
+ * Plain-string options are identifiers (value === label) and are NEVER localized.
+ * Object options (`{ value, label }`) localize only `label`, preserving `value` verbatim.
  *
  * @param {any[]} optionsArray
  * @param {string} keyPrefix
@@ -357,17 +359,14 @@ function localizeFieldsCollection(fields, parentKey, locale, options) {
 function localizeOptionsArray(optionsArray, keyPrefix, locale, options) {
 	return optionsArray.map((opt, idx) => {
 		if (typeof opt === "string") {
-			return localizeString(opt, locale, {
-				...options,
-				key: `${keyPrefix}.${idx}`,
-			});
+			return opt;
 		}
 		if (opt && typeof opt === "object" && opt.label) {
 			return {
 				...opt,
 				label: localizeString(opt.label, locale, {
 					...options,
-					key: `${keyPrefix}.${opt.value || idx}.label`,
+					key: `${keyPrefix}.${opt.value ?? idx}.label`,
 				}),
 			};
 		}
@@ -412,14 +411,15 @@ export function localizeManifest(manifest, locale, options = {}) {
 		localized.blockTypes = localized.blockTypes.map((bt) => localizeSingleBlockType(bt, locale, options));
 	}
 
-	// 3. Localize Menus
+	// 3. Localize Menus (`menu.name` is an identifier and is never localized; only `menu.label` if present)
 	if (Array.isArray(localized.menus)) {
 		localized.menus = localized.menus.map((menu) => {
 			if (!menu || typeof menu !== "object") return menu;
+			if (!menu.label) return menu;
 			const m = { ...menu };
-			m.name = localizeString(m.name, locale, {
+			m.label = localizeString(m.label, locale, {
 				...options,
-				key: `menus.${m.slug || m.id}.name`,
+				key: `menus.${m.slug || m.id || m.name}.label`,
 			});
 			return m;
 		});
@@ -1059,18 +1059,12 @@ export function extractSeedStrings(seed, options = {}) {
 		return trimmed;
 	}
 
-	function deepWalk(obj, parentKey = "") {
+	function deepWalk(obj) {
 		if (!obj || typeof obj !== "object") return;
 		if (Array.isArray(obj)) {
-			for (let i = 0; i < obj.length; i++) {
-				const item = obj[i];
-				if (
-					typeof item === "string" &&
-					(item.includes(" / ") || parentKey === "options")
-				) {
-					processString(item, obj, i);
-				} else if (item && typeof item === "object") {
-					deepWalk(item, parentKey);
+			for (const item of obj) {
+				if (item && typeof item === "object") {
+					deepWalk(item);
 				}
 			}
 			return;
@@ -1079,7 +1073,7 @@ export function extractSeedStrings(seed, options = {}) {
 			if (typeof v === "string" && SEED_TARGET_KEYS.has(k)) {
 				processString(v, obj, k);
 			} else if (typeof v === "object" && v !== null) {
-				deepWalk(v, k);
+				deepWalk(v);
 			}
 		}
 	}
@@ -1112,15 +1106,98 @@ export function extractSeedStrings(seed, options = {}) {
 		}
 	}
 
+	// Menus: menu.name is an identifier and is never extracted; only menu.label if present
 	if (Array.isArray(seed.menus)) {
 		for (const menu of seed.menus) {
-			if (menu && typeof menu === "object" && typeof menu.name === "string") {
-				processString(menu.name, menu, "name");
+			if (menu && typeof menu === "object" && typeof menu.label === "string") {
+				processString(menu.label, menu, "label");
 			}
 		}
 	}
 
 	return { keys: [...keysSet], inlineTranslations };
+}
+
+/**
+ * Collects plain-string select option values and menu names from a seed or manifest object,
+ * and warns once via `console.warn` if any dictionary phrase key equals one of those identifiers.
+ *
+ * @param {any} schema Seed or manifest object.
+ * @param {Record<string, Record<string, string>> | undefined} dictionary
+ * @param {Set<string>} [warnedKeys]
+ * @returns {string[]} List of warning messages emitted.
+ */
+export function warnOnIdentifierDictionaryKeys(
+	schema,
+	dictionary,
+	warnedKeys = new Set(),
+) {
+	const warnings = [];
+	if (!schema || typeof schema !== "object" || !dictionary || typeof dictionary !== "object") {
+		return warnings;
+	}
+
+	const root =
+		schema.data && typeof schema.data === "object" && !Array.isArray(schema.data)
+			? schema.data
+			: schema;
+
+	/** @type {Set<string>} */
+	const optionValues = new Set();
+	/** @type {Set<string>} */
+	const menuNames = new Set();
+
+	function scanForOptionValues(obj) {
+		if (!obj || typeof obj !== "object") return;
+		if (Array.isArray(obj)) {
+			for (const item of obj) {
+				if (item && typeof item === "object") {
+					scanForOptionValues(item);
+				}
+			}
+			return;
+		}
+		for (const [k, v] of Object.entries(obj)) {
+			if (k === "options" && Array.isArray(v)) {
+				for (const opt of v) {
+					if (typeof opt === "string" && opt.trim()) {
+						optionValues.add(opt);
+					}
+				}
+			} else if (typeof v === "object" && v !== null) {
+				scanForOptionValues(v);
+			}
+		}
+	}
+
+	if (root.collections) scanForOptionValues(root.collections);
+	if (root.blockTypes) scanForOptionValues(root.blockTypes);
+
+	if (Array.isArray(root.menus)) {
+		for (const menu of root.menus) {
+			if (menu && typeof menu === "object" && typeof menu.name === "string" && menu.name.trim()) {
+				menuNames.add(menu.name);
+			}
+		}
+	}
+
+	const knownPhrases = getKnownDictionaryPhrases(dictionary);
+	for (const key of knownPhrases) {
+		if (optionValues.has(key) && !warnedKeys.has(`opt:${key}`)) {
+			warnedKeys.add(`opt:${key}`);
+			const msg = `[emdash-schema-i18n] dictionary key "${key}" equals a select option value; it will not be applied to options, use a path key for labels`;
+			console.warn(msg);
+			warnings.push(msg);
+		}
+		if (menuNames.has(key) && !warnedKeys.has(`menu:${key}`)) {
+			warnedKeys.add(`menu:${key}`);
+			const msg = `[emdash-schema-i18n] dictionary key "${key}" equals a menu name; it will not be applied to menus, use a path key for labels`;
+			console.warn(msg);
+			warnings.push(msg);
+		}
+	}
+
+	return warnings;
 }
 
 /**
@@ -1147,6 +1224,8 @@ export function assertDictionaryCovers(seed, dictionary, locales = ["uk"]) {
 	if (targetLocales.length === 0) {
 		targetLocales.push("uk");
 	}
+
+	warnOnIdentifierDictionaryKeys(seed, dictionary);
 
 	const knownPhrases =
 		dictionary && typeof dictionary === "object"
@@ -1199,5 +1278,6 @@ export function assertDictionaryCovers(seed, dictionary, locales = ["uk"]) {
 		locales: targetLocales,
 	};
 }
+
 
 

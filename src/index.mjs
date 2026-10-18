@@ -19,6 +19,7 @@ import {
 	recordTaxonomyTranslations,
 	restoreOriginalTaxonomyInput,
 	extractSeedStrings,
+	warnOnIdentifierDictionaryKeys,
 	assertDictionaryCovers,
 	localizeString,
 	resolveAdminLocale,
@@ -28,7 +29,7 @@ import {
 
 const pluginId = "schema-i18n";
 const pluginName = "Schema & Blocks i18n";
-const version = "1.4.0";
+const version = "1.4.1";
 const description = "Dynamic schema, collections, and block types localization for EmDash CMS Admin UI";
 const author = "Serhii Parshyn";
 const packageEntrypoint = "emdash-schema-i18n";
@@ -86,6 +87,7 @@ export {
 	recordTaxonomyTranslations,
 	restoreOriginalTaxonomyInput,
 	extractSeedStrings,
+	warnOnIdentifierDictionaryKeys,
 	assertDictionaryCovers,
 	localizeString,
 	resolveAdminLocale,

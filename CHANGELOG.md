@@ -2,6 +2,22 @@
 
 All notable changes to `emdash-schema-i18n` are documented in this file.
 
+## [1.4.1] - 2026-10-19
+
+> **⚠️ Behaviour Fix in `1.4.1`:**
+> Select option values and menu names are no longer translated. Dictionaries that relied on translating plain-string options must switch to `{ value, label }` options.
+
+### Fixed
+- **Never Translate Identifiers (`options` strings & `menu.name`)**:
+  - Plain-string select options (`options: ["cover", "contain"]` and `validation.options: ["public", "private"]`) are now left untouched across manifest fields, block-type fields, repeater/group sub-fields, and `versions[].fields`. Previously, if a dictionary contained a phrase matching a plain-string option value (e.g. `"private": "приватний"`), the admin received and saved the translated value as the stored option value.
+  - Object options (`{ value, label }`) continue to localize `label` (via path key `...options.<value>.label`, then phrase lookup) and copy `value` verbatim; objects without `label` are left untouched.
+  - `menu.name` (e.g. `"primary"`) is treated as an identifier and is never localized (`menu.label` is localized if present).
+- **Updated Coverage Helpers & CLI Extraction**: `extractSeedStrings`, `assertDictionaryCovers`, and `emdash-schema-i18n extract` / `--check` no longer extract or require translations for plain-string options or `menu.name` (they still collect `{ value, label }` option labels and `menu.label`).
+- **Safety Net Warning (`warnOnIdentifierDictionaryKeys`)**: `assertDictionaryCovers` and the first manifest processed by `createLocalizationMiddleware` now log a one-time `console.warn` when a dictionary phrase key equals a plain-string option value or a `menu.name` (`dictionary key "<k>" equals a select option value; it will not be applied to options, use a path key for labels`).
+- **RFC 6838 Media Type Validation (`isJsonMimeType`)**: Hardened `isJsonMimeType` to validate restricted media-type syntax (`/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/`) before checking `application/json` or `+json`, rejecting malformed headers such as `application/x/+json`, `text/json+evil`, or `application/json, text/html`.
+
+---
+
 ## [1.4.0] - 2026-10-18
 
 > **⚠️ Breaking Default Changes in `1.4.0` (Safer Opt-In Defaults):**

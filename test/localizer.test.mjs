@@ -450,7 +450,7 @@ test("localizeManifest supports custom separator and splitBilingual: false", () 
 	assert.equal(noSplitUk.collections.posts.label, "Записи / Posts");
 });
 
-test("extractSeedStrings and assertDictionaryCovers verify dictionary completeness across multiple locales", () => {
+test("extractSeedStrings and assertDictionaryCovers verify dictionary completeness across multiple locales (ignoring plain-string options and menu.name)", () => {
 	const seed = {
 		collections: [
 			{
@@ -459,6 +459,12 @@ test("extractSeedStrings and assertDictionaryCovers verify dictionary completene
 				labelSingular: "Project",
 				fields: [
 					{ slug: "title", label: "Title" },
+					{
+						slug: "fit",
+						label: "Image fit",
+						options: ["cover", "contain"],
+						validation: { options: ["public", "private"] },
+					},
 				],
 			},
 		],
@@ -469,12 +475,12 @@ test("extractSeedStrings and assertDictionaryCovers verify dictionary completene
 				labelSingular: "Project category",
 			},
 		],
-		menus: [{ slug: "main", name: "Main navigation" }],
+		menus: [{ slug: "main", name: "primary" }],
 	};
 
 	const extracted = extractSeedStrings(seed);
 	assert.deepEqual(extracted.keys.sort(), [
-		"Main navigation",
+		"Image fit",
 		"Project",
 		"Project categories",
 		"Project category",
@@ -487,29 +493,30 @@ test("extractSeedStrings and assertDictionaryCovers verify dictionary completene
 			Projects: "Проєкти",
 			Project: "Проєкт",
 			Title: "Заголовок",
+			"Image fit": "Масштабування зображення",
 			"Project categories": "Категорії проєктів",
 			"Project category": "Категорія проєкту",
-			"Main navigation": "Головна навігація",
 		},
 		de: {
 			Projects: "Projekte",
 			Project: "Projekt",
 			Title: "Titel",
+			"Image fit": "Bildanpassung",
 			"Project categories": "Projektkategorien",
 			"Project category": "Projektkategorie",
-			"Main navigation": "Hauptnavigation",
 		},
 	};
 
+	// Passes without entries for plain-string options ("cover", "contain", "public", "private") or menu.name ("primary")
 	const res = assertDictionaryCovers(seed, completeDict, ["uk", "de"]);
 	assert.equal(res.covered, true);
 	assert.deepEqual(res.locales, ["uk", "de"]);
 
-	// Incomplete dictionary throws with `.missing` breakdown
+	// Incomplete dictionary throws with `.missing` breakdown for missing field/taxonomy labels
 	const incompleteDict = {
 		uk: {
 			...completeDict.uk,
-			"Project categories": "",
+			"Image fit": "",
 		},
 		de: {
 			Projects: "Projekte",
@@ -521,9 +528,292 @@ test("extractSeedStrings and assertDictionaryCovers verify dictionary completene
 		(err) => {
 			assert.ok(err.message.includes("[uk] (1 missing)"));
 			assert.ok(err.message.includes("[de] (5 missing)"));
-			assert.deepEqual(err.missing.uk, ["Project categories"]);
+			assert.deepEqual(err.missing.uk, ["Image fit"]);
 			assert.equal(err.missing.de.length, 5);
 			return true;
 		},
 	);
 });
+
+test("1.4.1: plain-string options and menu.name are never translated, while { value, label } options translate only label", () => {
+	const manifest = {
+		collections: {
+			media: {
+				label: "Media",
+				fields: {
+					fit: {
+						label: "Fit",
+						type: "select",
+						options: ["cover", "contain"],
+						validation: {
+							options: ["public", "private"],
+						},
+					},
+					displayMode: {
+						label: "Display Mode",
+						type: "select",
+						options: [
+							{ value: "cover", label: "Cover" },
+							{ value: "contain" }, // object without label is left untouched
+						],
+						validation: {
+							options: [
+								{ value: "public", label: "Public" },
+							],
+						},
+					},
+					repeaterGroup: {
+						label: "Items",
+						type: "repeater",
+						fields: [
+							{
+								slug: "sub_fit",
+								label: "Sub Fit",
+								options: ["cover", "contain"],
+								validation: { options: ["public", "private"] },
+							},
+						],
+					},
+					contentBlocks: {
+						label: "Blocks",
+						kind: "blocks",
+						blockTypes: [
+							{
+								slug: "hero",
+								label: "Hero",
+								fields: [
+									{
+										slug: "hero_fit",
+										label: "Hero Fit",
+										options: ["cover", "contain"],
+										validation: { options: ["public", "private"] },
+									},
+								],
+								versions: [
+									{
+										version: 1,
+										fields: [
+											{
+												slug: "version_fit",
+												label: "Version Fit",
+												options: ["cover", "contain"],
+												validation: { options: ["public", "private"] },
+											},
+										],
+									},
+								],
+							},
+						],
+					},
+				},
+			},
+		},
+		blockTypes: [
+			{
+				slug: "gallery",
+				label: "Gallery",
+				fields: [
+					{
+						slug: "gallery_fit",
+						label: "Gallery Fit",
+						options: ["cover", "contain"],
+						validation: { options: ["public", "private"] },
+					},
+				],
+				versions: [
+					{
+						version: 1,
+						fields: [
+							{
+								slug: "gallery_version_fit",
+								label: "Gallery Version Fit",
+								options: ["cover", "contain"],
+								validation: { options: ["public", "private"] },
+							},
+						],
+					},
+				],
+			},
+		],
+		menus: [
+			{
+				slug: "main",
+				name: "primary",
+				label: "Primary Navigation",
+			},
+		],
+	};
+
+	const dict = {
+		uk: {
+			cover: "обкладинка",
+			contain: "вмістити",
+			public: "публічний",
+			private: "приватний",
+			primary: "основне",
+			Cover: "Обкладинка",
+			Public: "Публічний",
+			"Primary Navigation": "Головна навігація",
+		},
+		en: {
+			cover: "Cover Override",
+			primary: "Primary Override",
+		},
+	};
+
+	for (const locale of ["uk", "en"]) {
+		const res = localizeManifest(manifest, locale, { dictionary: dict });
+		const mediaFields = res.collections.media.fields;
+
+		// 1. Manifest field plain-string options & validation.options stay untouched
+		assert.deepEqual(mediaFields.fit.options, ["cover", "contain"]);
+		assert.deepEqual(mediaFields.fit.validation.options, ["public", "private"]);
+
+		// 2. Nested repeater sub-field plain-string options & validation.options stay untouched
+		assert.deepEqual(mediaFields.repeaterGroup.fields[0].options, ["cover", "contain"]);
+		assert.deepEqual(mediaFields.repeaterGroup.fields[0].validation.options, ["public", "private"]);
+
+		// 3. Nested blocks field blockTypes fields & versions[].fields stay untouched
+		const heroBt = mediaFields.contentBlocks.blockTypes[0];
+		assert.deepEqual(heroBt.fields[0].options, ["cover", "contain"]);
+		assert.deepEqual(heroBt.fields[0].validation.options, ["public", "private"]);
+		assert.deepEqual(heroBt.versions[0].fields[0].options, ["cover", "contain"]);
+		assert.deepEqual(heroBt.versions[0].fields[0].validation.options, ["public", "private"]);
+
+		// 4. Top-level blockTypes fields & versions[].fields stay untouched
+		const galleryBt = res.blockTypes[0];
+		assert.deepEqual(galleryBt.fields[0].options, ["cover", "contain"]);
+		assert.deepEqual(galleryBt.fields[0].validation.options, ["public", "private"]);
+		assert.deepEqual(galleryBt.versions[0].fields[0].options, ["cover", "contain"]);
+		assert.deepEqual(galleryBt.versions[0].fields[0].validation.options, ["public", "private"]);
+
+		// 5. menu.name is unchanged
+		assert.equal(res.menus[0].name, "primary");
+	}
+
+	// Verify { value, label } options in uk translate only `label`, preserving `value` verbatim
+	const ukRes = localizeManifest(manifest, "uk", { dictionary: dict });
+	assert.deepEqual(ukRes.collections.media.fields.displayMode.options, [
+		{ value: "cover", label: "Обкладинка" },
+		{ value: "contain" },
+	]);
+	assert.deepEqual(ukRes.collections.media.fields.displayMode.validation.options, [
+		{ value: "public", label: "Публічний" },
+	]);
+	assert.equal(ukRes.menus[0].label, "Головна навігація");
+
+	// Also verify localizeBlockTypesResponse and localizeCollectionsResponse preserve plain-string options
+	const btApiRes = localizeBlockTypesResponse(
+		{
+			data: {
+				items: [
+					{
+						slug: "gallery",
+						label: "Gallery",
+						fields: [
+							{
+								slug: "fit",
+								options: ["cover", "contain"],
+								validation: { options: ["public", "private"] },
+							},
+						],
+						versions: [
+							{
+								fields: [
+									{
+										slug: "v_fit",
+										options: ["cover", "contain"],
+										validation: { options: ["public", "private"] },
+									},
+								],
+							},
+						],
+					},
+				],
+			},
+		},
+		"uk",
+		{ dictionary: dict },
+	);
+	assert.deepEqual(btApiRes.data.items[0].fields[0].options, ["cover", "contain"]);
+	assert.deepEqual(btApiRes.data.items[0].fields[0].validation.options, ["public", "private"]);
+	assert.deepEqual(btApiRes.data.items[0].versions[0].fields[0].options, ["cover", "contain"]);
+	assert.deepEqual(btApiRes.data.items[0].versions[0].fields[0].validation.options, ["public", "private"]);
+
+	const colApiRes = localizeCollectionsResponse(
+		{
+			data: {
+				items: [
+					{
+						slug: "media",
+						label: "Media",
+						fields: [
+							{
+								slug: "fit",
+								options: ["cover", "contain"],
+								validation: { options: ["public", "private"] },
+							},
+						],
+					},
+				],
+			},
+		},
+		"uk",
+		{ dictionary: dict },
+	);
+	assert.deepEqual(colApiRes.data.items[0].fields[0].options, ["cover", "contain"]);
+	assert.deepEqual(colApiRes.data.items[0].fields[0].validation.options, ["public", "private"]);
+});
+
+test("warnOnIdentifierDictionaryKeys warns once when dictionary phrase keys match plain-string option values or menu.name", () => {
+	const seed = {
+		collections: [
+			{
+				slug: "articles",
+				label: "Articles",
+				fields: [
+					{
+						slug: "visibility",
+						label: "Visibility",
+						options: ["public", "private"],
+					},
+				],
+			},
+		],
+		menus: [{ slug: "main", name: "primary" }],
+	};
+
+	const dict = {
+		uk: {
+			Articles: "Статті",
+			Visibility: "Видимість",
+			private: "приватний",
+			primary: "основне",
+		},
+	};
+
+	const captured = [];
+	const prevWarn = console.warn;
+	console.warn = (...args) => captured.push(args.join(" "));
+	try {
+		assertDictionaryCovers(seed, dict, ["uk"]);
+		assert.equal(captured.length, 2);
+		assert.ok(
+			captured.some((msg) =>
+				msg.includes(
+					'dictionary key "private" equals a select option value; it will not be applied to options, use a path key for labels',
+				),
+			),
+		);
+		assert.ok(
+			captured.some((msg) =>
+				msg.includes(
+					'dictionary key "primary" equals a menu name; it will not be applied to menus, use a path key for labels',
+				),
+			),
+		);
+	} finally {
+		console.warn = prevWarn;
+	}
+});
+
