@@ -28,7 +28,7 @@ test("Live EmDash E2E: Schema, collections, and block types localization", async
 	assert.ok(sessionMatch, "Should receive astro-session cookie from dev-bypass");
 	const sessionCookie = `astro-session=${sessionMatch[1]}`;
 
-	// 2. Test English / default manifest
+	// 2. Test English / default manifest (no emdash-locale cookie)
 	const enManifestRes = await fetch(`${BASE_URL}/_emdash/api/manifest`, {
 		headers: { Cookie: sessionCookie },
 	});
@@ -46,9 +46,21 @@ test("Live EmDash E2E: Schema, collections, and block types localization", async
 		"Main Headline"
 	);
 
-	// 3. Test Ukrainian manifest via ?locale=uk query parameter
-	const ukManifestRes = await fetch(`${BASE_URL}/_emdash/api/manifest?locale=uk`, {
-		headers: { Cookie: sessionCookie },
+	// 2b. Verify that ?locale=uk and Accept-Language without emdash-locale cookie are ignored by default
+	// (since allowQueryParam: false and useAcceptLanguage: false by default in 1.4.0)
+	const queryOnlyRes = await fetch(`${BASE_URL}/_emdash/api/manifest?locale=uk`, {
+		headers: {
+			Cookie: sessionCookie,
+			"Accept-Language": "uk-UA,uk;q=0.9",
+		},
+	});
+	assert.equal(queryOnlyRes.status, 200);
+	const queryOnlyManifest = await queryOnlyRes.json();
+	assert.equal(queryOnlyManifest.data.collections.articles.label, "Articles");
+
+	// 3. Test Ukrainian manifest via emdash-locale=uk cookie
+	const ukManifestRes = await fetch(`${BASE_URL}/_emdash/api/manifest`, {
+		headers: { Cookie: `${sessionCookie}; emdash-locale=uk` },
 	});
 	assert.equal(ukManifestRes.status, 200);
 	const ukManifest = await ukManifestRes.json();
@@ -94,11 +106,10 @@ test("Live EmDash E2E: Schema, collections, and block types localization", async
 	assert.equal(ukCollections.data.items[0].labelSingular, "Стаття");
 	assert.equal(ukCollections.data.items[0].description, "Новини компанії та блог");
 
-	// 5. Test block-types schema API with Accept-Language header
+	// 5. Test block-types schema API with emdash-locale cookie
 	const ukBlockTypesRes = await fetch(`${BASE_URL}/_emdash/api/schema/block-types`, {
 		headers: {
-			Cookie: sessionCookie,
-			"Accept-Language": "uk-UA,uk;q=0.9,en;q=0.8",
+			Cookie: `${sessionCookie}; emdash-locale=uk`,
 		},
 	});
 	assert.equal(ukBlockTypesRes.status, 200);
